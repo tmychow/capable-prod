@@ -5,30 +5,10 @@ A FastAPI backend for experiment management.
 ## Project Structure
 
 ```
-backend/
-├── app/
-│   ├── api/                    # API Layer
-│   │   └── v1/                 # API versioning
-│   │       ├── endpoints/      # Route handlers (e.g., experiments.py)
-│   │       └── api.py          # Main router
+capable-server/
+├── api/
 │   │
-│   ├── core/                   # App Configuration
-│   │   ├── config.py           # Pydantic Settings (DB URLs, JWT secrets)
-│   │   └── security.py         # JWT & password hashing
-│   │
-│   ├── crud/                   # Database Operations
-│   │   └── crud_experiment.py  # Reusable DB queries
-│   │
-│   ├── models/                 # SQLAlchemy Models
-│   │   └── experiment.py
-│   │
-│   ├── schemas/                # Pydantic Schemas (Request/Response validation)
-│   │   └── experiment.py
-│   │
-│   ├── db/                     # Database Connection
-│   │   ├── session.py          # SQLAlchemy session generator
-│   │   └── base.py             # Model imports for Alembic
-│   │
+│   ├── ...                     # Other files 
 │   └── main.py                 # Application entry point
 │
 ├── tests/                      # Test suite
