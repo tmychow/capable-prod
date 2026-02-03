@@ -49,3 +49,5 @@ next-env.d.ts
 # python
 __pycache__
 .venv/
+*.csv
+!capable-exp/raw/nps_mastersheet_filtered_enriched.csv

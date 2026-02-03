@@ -1,0 +1,13 @@
+{
+    "input_csv": "raw/nps_mastersheet_filtered_enriched.csv",
+    "output_csv": "outputs/nps_truncation_results.csv",
+    "row_counts": [100, 200, 300, 400, 500],
+    "seeds": {
+      "count": 3,
+      "start": 100
+    },
+    "base_prompt": "I am thinking about new sleep-reduction peptides.",
+    "response_tag": "peptide",
+    "max_parallel": 15
+  }
+  
