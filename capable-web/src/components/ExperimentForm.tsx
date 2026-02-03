@@ -93,7 +93,7 @@ export default function ExperimentForm({
     experiment?.experiment_end || ""
   );
   const [oldenLabsStudyId, setOldenLabsStudyId] = useState(
-    experiment?.olden_labs_study_id || ""
+    experiment?.olden_labs_study_id?.toString() ?? ""
   );
 
   // Parameters as array of key-value pairs (easier to edit than JSON)
