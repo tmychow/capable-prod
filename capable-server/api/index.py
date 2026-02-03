@@ -18,9 +18,12 @@ app = FastAPI(
     version="0.1.0",
 )
 
+all_vercel_previews = r"https://.*\.vercel\.app"
+localhost = r"http://localhost(:\d+)?"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=f"({all_vercel_previews}|{localhost})",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -182,15 +185,10 @@ async def update_experiment(
 
 
 @app.delete("/experiments/{experiment_id}")
-async def delete_experiment(
-    experiment_id: str, user=Depends(get_current_user)
-):
+async def delete_experiment(experiment_id: str, user=Depends(get_current_user)):
     supabase = get_supabase()
     result = (
-        supabase.table("experiments")
-        .delete()
-        .eq("id", experiment_id)
-        .execute()
+        supabase.table("experiments").delete().eq("id", experiment_id).execute()
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Experiment not found")
