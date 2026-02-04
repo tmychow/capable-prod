@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 RESULTS_PATH = Path("outputs/nps_truncation_results.csv")
-MASTER_PATH = Path("raw/nps_mastersheet_filtered_enriched.csv")
+MASTER_PATH = Path("outputs/nps_mastersheet_normalized.csv")
 OUTPUT_PATH = Path("outputs/nps_truncation_postcheck.csv")
 
 

@@ -51,21 +51,38 @@ def format_rows(rows: list[dict[str, str]], fieldnames: list[str]) -> str:
 
 def build_prompt(
     csv_path: str,
-    n_results: int,
-    seed: int,
     base_prompt: str,
     response_tag: str,
 ) -> str:
     return (
         f"{base_prompt.strip()}\n\n"
-        f"Experimental results (top {n_results} rows, CSV) are in {csv_path}.\n"
-        "Read the file contents directly (e.g., cat or python). "
-        "Only use information present in that CSV.\n\n"
-        f"Random seed: {seed} (use only to break ties between equally good options).\n\n"
-        f"Suggest one new peptide to test. Return only an XML tag "
-        f"<{response_tag}>...</{response_tag}> with the peptide sequence inside."
+        f"Experimental results are in {csv_path}.\n"
+        f"Please look at the results and help suggest five new peptides to test. "
+        f"Return each as an XML tag <{response_tag}>...</{response_tag}> with the peptide sequence inside.\n"
+        "Formatting rules:\n"
+        "- Make sure to explicitly include termini if you are wanting to add them (e.g., H-, Ac-, -NH2, -OH).\n"
+        "- No spaces. Parentheses only. No brackets.\n"
+        "- Standard L-amino acids use one-letter uppercase codes.\n"
+        "- Backbone substitutions or nonstandard residues: format as \"-(TOKEN)-\" between flanking residues.\n"
+        "  Examples: M-(N-Me-Lys)-T, K-(Dab)-T, F-(beta-homo-Arg)-N, A-(Aib)-G, K-(D-Ser)-S.\n"
+        "- Side-chain modifications: attach directly to the residue in parentheses with NO dashes.\n"
+        "  Examples: R(N-omega-Me), K(gamma-E-C16).\n"
+        "- D-amino acids: treat as backbone substitutions (use -(D-Ser)-, -(D-Arg)-, etc.).\n"
+        "- Spell out Greek letters as words: alpha, beta, gamma, delta, omega.\n"
+        "\n"
+        "Canonical token list (use these exact spellings when applicable; prefer E over Glu):\n"
+        "- N-Me-Lys, D-Arg, D-Asn, D-Gln, D-Lys, D-Ser, Dab, Aib, Nle, beta-homo-Arg, N-omega-Me,\n"
+        "  gamma-E-C8, gamma-E-C16, gamma-E-C18.\n"
+        "\n"
+        "Normalization guidance (apply these mappings when seen):\n"
+        "- gamma-Glu-* or gamma-glutamyl-* -> gamma-E-*\n"
+        "- gamma-E-Pal / palmitoyl / palmitate / C16 -> gamma-E-C16\n"
+        "- stearoyl / stearate / C18 -> gamma-E-C18\n"
+        "- octanoyl / caprylate / C8 -> gamma-E-C8\n"
+        "- NomegaMe -> N-omega-Me\n"
+        "- beta-hArg -> beta-homo-Arg\n"
+        "- N-Me-L-Lys -> N-Me-Lys\n"
     )
-
 
 def extract_tags(text: str, tag: str) -> list[str]:
     matches = re.findall(
@@ -181,8 +198,6 @@ def main() -> None:
                     "rows_text": rows_text,
                     "prompt": build_prompt(
                         csv_path,
-                        n_results,
-                        seed,
                         base_prompt,
                         response_tag,
                     ),

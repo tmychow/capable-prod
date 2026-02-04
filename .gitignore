@@ -51,3 +51,4 @@ __pycache__
 .venv/
 *.csv
 !capable-exp/raw/nps_mastersheet_filtered_enriched.csv
+capable-exp/raw/peptides.html
