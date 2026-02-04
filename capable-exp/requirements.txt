@@ -1,1 +1,4 @@
 modal
+pandas
+numpy
+matplotlib

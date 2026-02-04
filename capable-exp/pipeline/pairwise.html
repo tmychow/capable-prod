@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pairwise Peptide Judge</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "IBM Plex Sans", "Space Grotesk", "Avenir Next", Helvetica, Arial, sans-serif;
+      }
+      body {
+        margin: 32px;
+        background: #f6f3ee;
+        color: #1f1c17;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 8px 0;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 20px;
+      }
+      .panel {
+        background: #ffffff;
+        border: 1px solid #ddd4c9;
+        padding: 16px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: #6b655d;
+        margin: 10px 0 4px;
+      }
+      input[type="file"],
+      input[type="text"],
+      input[type="number"],
+      button {
+        width: 100%;
+        padding: 8px;
+        font-size: 13px;
+        border: 1px solid #c9c1b7;
+        background: #fff;
+      }
+      button {
+        background: #1f1c17;
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #efe8df;
+        color: #1f1c17;
+      }
+      .meta {
+        font-size: 12px;
+        color: #6b655d;
+      }
+      .match {
+        display: grid;
+        grid-template-columns: 1fr 120px 1fr;
+        gap: 16px;
+        align-items: stretch;
+        margin-top: 16px;
+      }
+      .card {
+        border: 1px solid #ddd4c9;
+        background: #fffdf9;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 220px;
+      }
+      .sequence {
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .actions {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .center-actions {
+        display: grid;
+        gap: 8px;
+      }
+      .hidden {
+        display: none;
+      }
+      @media (max-width: 960px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .match {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Pairwise Peptide Judge (Swiss)</h1>
+    <div class="meta">Load a n_results_peptides CSV, dedupe peptides, and run pairwise judgments with a Swiss-style schedule.</div>
+
+    <div class="layout">
+      <div class="panel">
+        <label for="csvInput">n_results_peptides CSV</label>
+        <input id="csvInput" type="file" accept=".csv" />
+
+        <label for="roundsInput">Swiss rounds</label>
+        <input id="roundsInput" type="number" min="1" value="5" />
+
+        <label for="judgeIdInput">Judge ID</label>
+        <input id="judgeIdInput" type="text" placeholder="e.g. judge_01" />
+
+        <button id="startButton">Start judging</button>
+        <button id="downloadButton" class="secondary" disabled>Download rankings</button>
+        <button id="undoButton" class="secondary" disabled>Undo last</button>
+
+        <div class="meta" id="status"></div>
+      </div>
+
+      <div class="panel">
+        <div class="meta" id="progress">Load a CSV to begin.</div>
+        <div class="match hidden" id="matchPanel">
+          <div class="card">
+            <div>
+              <div class="meta" id="leftMeta"></div>
+              <div class="sequence" id="leftSeq"></div>
+            </div>
+            <div class="actions">
+              <button id="leftWin">Left wins</button>
+              <button id="leftInvalid" class="secondary">Left invalid</button>
+            </div>
+          </div>
+
+          <div class="center-actions">
+            <button id="sameButton" class="secondary">Same sequence</button>
+          </div>
+
+          <div class="card">
+            <div>
+              <div class="meta" id="rightMeta"></div>
+              <div class="sequence" id="rightSeq"></div>
+            </div>
+            <div class="actions">
+              <button id="rightWin">Right wins</button>
+              <button id="rightInvalid" class="secondary">Right invalid</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const csvInput = document.getElementById("csvInput");
+      const roundsInput = document.getElementById("roundsInput");
+      const judgeIdInput = document.getElementById("judgeIdInput");
+      const startButton = document.getElementById("startButton");
+      const downloadButton = document.getElementById("downloadButton");
+      const undoButton = document.getElementById("undoButton");
+      const statusEl = document.getElementById("status");
+      const progressEl = document.getElementById("progress");
+      const matchPanel = document.getElementById("matchPanel");
+      const leftSeq = document.getElementById("leftSeq");
+      const rightSeq = document.getElementById("rightSeq");
+      const leftMeta = document.getElementById("leftMeta");
+      const rightMeta = document.getElementById("rightMeta");
+
+      const leftWin = document.getElementById("leftWin");
+      const rightWin = document.getElementById("rightWin");
+      const leftInvalid = document.getElementById("leftInvalid");
+      const rightInvalid = document.getElementById("rightInvalid");
+      const sameButton = document.getElementById("sameButton");
+
+      let peptides = [];
+      let round = 1;
+      let totalRounds = 5;
+      let currentPairIndex = 0;
+      let roundPairs = [];
+      let matchHistory = new Set();
+      let matches = [];
+      let undoState = null;
+      let undoUsed = false;
+
+      function parseCsv(text) {
+        const rows = [];
+        let row = [];
+        let field = "";
+        let inQuotes = false;
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i];
+          const next = text[i + 1];
+          if (inQuotes) {
+            if (char === '"' && next === '"') {
+              field += '"';
+              i++;
+            } else if (char === '"') {
+              inQuotes = false;
+            } else {
+              field += char;
+            }
+          } else {
+            if (char === '"') {
+              inQuotes = true;
+            } else if (char === ',') {
+              row.push(field);
+              field = "";
+            } else if (char === '\n') {
+              row.push(field);
+              rows.push(row);
+              row = [];
+              field = "";
+            } else if (char === '\r') {
+              continue;
+            } else {
+              field += char;
+            }
+          }
+        }
+        if (field.length || row.length) {
+          row.push(field);
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      function buildObjects(rows) {
+        if (!rows.length) return [];
+        const headers = rows[0];
+        return rows.slice(1).map((row) => {
+          const obj = {};
+          headers.forEach((header, idx) => {
+            obj[header] = row[idx] ?? "";
+          });
+          return obj;
+        });
+      }
+
+      function extractPeptide(row) {
+        if (row.peptide) {
+          return row.peptide.trim();
+        }
+        if (row.sequence) {
+          return row.sequence.trim();
+        }
+        if (row.full_sequence) {
+          return row.full_sequence.trim();
+        }
+        return "";
+      }
+
+      function loadPeptides(rows) {
+        const seen = new Set();
+        const list = [];
+        rows.forEach((row) => {
+          const peptide = extractPeptide(row);
+          if (!peptide) return;
+          if (seen.has(peptide)) return;
+          seen.add(peptide);
+          list.push(peptide);
+        });
+        return list;
+      }
+
+      function initState(list) {
+        peptides = list.map((seq) => ({
+          seq,
+          elo: 1000,
+          wins: 0,
+          losses: 0,
+          ties: 0,
+          matches: 0,
+          invalid: false,
+          removedFor: "",
+          sameCount: 0,
+        }));
+        round = 1;
+        currentPairIndex = 0;
+        roundPairs = [];
+        matchHistory = new Set();
+        matches = [];
+      }
+
+      function expectedScore(eloA, eloB) {
+        return 1 / (1 + Math.pow(10, (eloB - eloA) / 400));
+      }
+
+      function updateElo(a, b, scoreA) {
+        const k = 32;
+        const expectedA = expectedScore(a.elo, b.elo);
+        const expectedB = expectedScore(b.elo, a.elo);
+        a.elo = a.elo + k * (scoreA - expectedA);
+        b.elo = b.elo + k * ((1 - scoreA) - expectedB);
+        a.matches += 1;
+        b.matches += 1;
+      }
+
+      function pairKey(a, b) {
+        return a < b ? `${a}|||${b}` : `${b}|||${a}`;
+      }
+
+      function generatePairs() {
+        const active = peptides.filter((p) => !p.invalid && !p.removedFor);
+        active.sort((a, b) => b.elo - a.elo);
+        const used = new Set();
+        const pairs = [];
+        for (let i = 0; i < active.length; i++) {
+          const a = active[i];
+          if (used.has(a.seq)) continue;
+          let partner = null;
+          for (let j = i + 1; j < active.length; j++) {
+            const candidate = active[j];
+            if (used.has(candidate.seq)) continue;
+            const key = pairKey(a.seq, candidate.seq);
+            if (!matchHistory.has(key)) {
+              partner = candidate;
+              break;
+            }
+          }
+          if (!partner) {
+            for (let j = i + 1; j < active.length; j++) {
+              const candidate = active[j];
+              if (used.has(candidate.seq)) continue;
+              partner = candidate;
+              break;
+            }
+          }
+          if (partner) {
+            used.add(a.seq);
+            used.add(partner.seq);
+            pairs.push([a, partner]);
+          }
+        }
+        return pairs;
+      }
+
+      function isActive(peptide) {
+        return !peptide.invalid && !peptide.removedFor;
+      }
+
+      function advanceToNextValidPair() {
+        while (currentPairIndex < roundPairs.length) {
+          const [left, right] = roundPairs[currentPairIndex];
+          if (isActive(left) && isActive(right)) {
+            return;
+          }
+          currentPairIndex += 1;
+        }
+      }
+
+      function updateProgress() {
+        const totalPairs = roundPairs.length;
+        progressEl.textContent = `Round ${round} of ${totalRounds} • Match ${Math.min(currentPairIndex + 1, totalPairs)}/${totalPairs}`;
+      }
+
+      function showPair() {
+        if (round > totalRounds || roundPairs.length === 0) {
+          matchPanel.classList.add("hidden");
+          progressEl.textContent = "Judging complete. Download the rankings.";
+          downloadButton.disabled = false;
+          return;
+        }
+        advanceToNextValidPair();
+        if (currentPairIndex >= roundPairs.length) {
+          round += 1;
+          currentPairIndex = 0;
+          roundPairs = generatePairs();
+          showPair();
+          return;
+        }
+        const [left, right] = roundPairs[currentPairIndex];
+        leftSeq.textContent = left.seq;
+        rightSeq.textContent = right.seq;
+        leftMeta.textContent = `Elo ${left.elo.toFixed(1)} • W${left.wins} L${left.losses} T${left.ties}`;
+        rightMeta.textContent = `Elo ${right.elo.toFixed(1)} • W${right.wins} L${right.losses} T${right.ties}`;
+        matchPanel.classList.remove("hidden");
+        updateProgress();
+      }
+
+      function recordMatch(left, right, outcome, notes) {
+        matches.push({
+          judge_id: judgeIdInput.value || "",
+          round,
+          left: left.seq,
+          right: right.seq,
+          outcome,
+          notes: notes || "",
+          timestamp: new Date().toISOString(),
+        });
+        matchHistory.add(pairKey(left.seq, right.seq));
+      }
+
+      function saveUndoState() {
+        undoState = {
+          peptides: peptides.map((p) => ({ ...p })),
+          round,
+          currentPairIndex,
+          roundPairs: roundPairs.map((pair) => pair.map((p) => p.seq)),
+          matchHistory: new Set(matchHistory),
+          matches: matches.slice(),
+        };
+        undoButton.disabled = undoUsed;
+      }
+
+      function restoreUndoState() {
+        if (!undoState || undoUsed) return;
+        peptides = undoState.peptides.map((p) => ({ ...p }));
+        round = undoState.round;
+        currentPairIndex = undoState.currentPairIndex;
+        roundPairs = undoState.roundPairs.map(([a, b]) => [
+          peptides.find((p) => p.seq === a),
+          peptides.find((p) => p.seq === b),
+        ]);
+        matchHistory = new Set(Array.from(undoState.matchHistory));
+        matches = undoState.matches.slice();
+        undoUsed = true;
+        undoButton.disabled = true;
+        showPair();
+      }
+
+      function handleWin(isLeft) {
+        const [left, right] = roundPairs[currentPairIndex];
+        saveUndoState();
+        if (isLeft) {
+          left.wins += 1;
+          right.losses += 1;
+          updateElo(left, right, 1);
+          recordMatch(left, right, "left", "");
+        } else {
+          right.wins += 1;
+          left.losses += 1;
+          updateElo(left, right, 0);
+          recordMatch(left, right, "right", "");
+        }
+        currentPairIndex += 1;
+        showPair();
+      }
+
+      function handleTie() {
+        const [left, right] = roundPairs[currentPairIndex];
+        saveUndoState();
+        left.ties += 1;
+        right.ties += 1;
+        left.sameCount += 1;
+        right.sameCount += 1;
+        updateElo(left, right, 0.5);
+        right.removedFor = left.seq;
+        recordMatch(left, right, "same", "same");
+        currentPairIndex += 1;
+        showPair();
+      }
+
+      function handleInvalid(isLeft) {
+        const [left, right] = roundPairs[currentPairIndex];
+        saveUndoState();
+        if (isLeft) {
+          left.invalid = true;
+          recordMatch(left, right, "invalid_left", "invalid");
+        } else {
+          right.invalid = true;
+          recordMatch(left, right, "invalid_right", "invalid");
+        }
+        currentPairIndex += 1;
+        showPair();
+      }
+
+      function csvEscape(value) {
+        const text = value == null ? "" : String(value);
+        const escaped = text.replace(/\"/g, '\"\"');
+        if (/[",\r\n]/.test(escaped)) {
+          return `"${escaped}"`;
+        }
+        return escaped;
+      }
+
+      function toCsv(rows) {
+        const lines = rows.map((row) => row.map(csvEscape).join(","));
+        return `\ufeff${lines.join("\r\n")}`;
+      }
+
+      function downloadCsv() {
+        const rows = [
+          [
+            "sequence",
+            "elo",
+            "wins",
+            "losses",
+            "ties",
+            "matches",
+            "invalid",
+            "same_count",
+            "removed_for",
+          ],
+        ];
+        peptides
+          .slice()
+          .sort((a, b) => b.elo - a.elo)
+          .forEach((p) => {
+            rows.push([
+              p.seq,
+              p.elo.toFixed(2),
+              p.wins,
+              p.losses,
+              p.ties,
+              p.matches,
+              p.invalid ? "1" : "0",
+              p.sameCount,
+              p.removedFor,
+            ]);
+          });
+        const csvText = toCsv(rows);
+        const blob = new Blob([csvText], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        const rawJudge = (judgeIdInput.value || "judge_01").trim() || "judge_01";
+        const safeJudge = rawJudge.replace(/[^a-zA-Z0-9_-]+/g, "_");
+        const suffix = safeJudge ? `_${safeJudge}` : "";
+        link.download = `rankings${suffix}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+
+      csvInput.addEventListener("change", async () => {
+        const file = csvInput.files[0];
+        if (!file) return;
+        const text = await file.text();
+        const rows = buildObjects(parseCsv(text));
+        csvInput.value = "";
+        statusEl.textContent = `Loaded ${rows.length} rows.`;
+        csvInput.dataset.rows = JSON.stringify(rows);
+        const peptides = loadPeptides(rows);
+        const suggestedRounds = Math.max(3, Math.ceil(Math.log2(Math.max(2, peptides.length))) + 2);
+        roundsInput.value = suggestedRounds;
+      });
+
+      startButton.addEventListener("click", () => {
+        const rows = csvInput.dataset.rows ? JSON.parse(csvInput.dataset.rows) : [];
+        if (!rows.length) {
+          statusEl.textContent = "Load an ablations CSV first.";
+          return;
+        }
+        totalRounds = Math.max(1, parseInt(roundsInput.value, 10) || 1);
+        const peptideList = loadPeptides(rows);
+        if (peptideList.length < 2) {
+          statusEl.textContent = "Need at least two peptides to compare.";
+          return;
+        }
+        initState(peptideList);
+        undoUsed = false;
+        undoState = null;
+        undoButton.disabled = true;
+        roundPairs = generatePairs();
+        currentPairIndex = 0;
+        statusEl.textContent = `Loaded ${peptideList.length} unique peptides.`;
+        downloadButton.disabled = true;
+        showPair();
+      });
+
+      leftWin.addEventListener("click", () => handleWin(true));
+      rightWin.addEventListener("click", () => handleWin(false));
+      sameButton.addEventListener("click", handleTie);
+      leftInvalid.addEventListener("click", () => handleInvalid(true));
+      rightInvalid.addEventListener("click", () => handleInvalid(false));
+      downloadButton.addEventListener("click", downloadCsv);
+      undoButton.addEventListener("click", restoreUndoState);
+    </script>
+  </body>
+</html>
