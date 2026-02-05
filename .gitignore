@@ -52,3 +52,4 @@ __pycache__
 *.csv
 !capable-exp/raw/nps_mastersheet_filtered_enriched.csv
 capable-exp/raw/peptides.html
+*.png

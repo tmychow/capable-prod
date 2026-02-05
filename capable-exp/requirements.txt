@@ -2,3 +2,4 @@ modal
 pandas
 numpy
 matplotlib
+scipy
