@@ -1,29 +1,25 @@
-<<<<<<< HEAD
-# capable-prod
-Humans are capable of greatness
-=======
-# Axonic
+# Capable
 
 A full-stack application for experiment management.
 
 ## Project Structure
 
 ```
-axonic-core/
-├── axonic-server/    # FastAPI backend
-└── axonic-web/       # Web frontend
+capable-core/
+├── capable-server/    # FastAPI backend
+└── capable-web/       # Web frontend
 ```
 
 ## Components
 
-### [axonic-server](./axonic-server)
+### [capable-server](./capable-server)
 
 FastAPI backend providing REST APIs for experiment management.
 
 - **Tech Stack:** Python, FastAPI
 - **Auth:** JWT-based authentication
 
-### [axonic-web](./axonic-web)
+### [capable-web](./capable-web)
 
 Web application frontend.
 
@@ -38,14 +34,14 @@ Web application frontend.
 
 1. **Backend:**
    ```bash
-   cd axonic-server
+   cd capable-server
    pip install -r requirements.txt
-   uvicorn app.main:app --reload
+   uvicorn app.index:app --reload
    ```
 
 2. **Frontend:**
    ```bash
-   cd axonic-web
+   cd capable-web
    npm install
    npm run dev
    ```
@@ -53,4 +49,3 @@ Web application frontend.
 ## License
 
 Proprietary
->>>>>>> fd153dc (Initial commit + finish web app and fastapi server prototype)
