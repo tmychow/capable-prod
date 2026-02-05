@@ -10,6 +10,7 @@ from api.schemas import (
     UserSignUp,
     UserLogin,
     AuthResponse,
+    ensure_utc,
 )
 
 app = FastAPI(
@@ -95,16 +96,17 @@ async def create_experiment(
         "name": experiment.name,
         "description": experiment.description,
         "organism_type": experiment.organism_type,
-        "parameters": experiment.parameters,
+        "groups": experiment.groups,
+        "additional_parameters": experiment.additional_parameters,
         "logs": experiment.logs,
         "peptides": experiment.peptides,
         "experiment_start": (
-            str(experiment.experiment_start)
+            ensure_utc(experiment.experiment_start).isoformat()
             if experiment.experiment_start
             else None
         ),
         "experiment_end": (
-            str(experiment.experiment_end)
+            ensure_utc(experiment.experiment_end).isoformat()
             if experiment.experiment_end
             else None
         ),
@@ -155,16 +157,18 @@ async def update_experiment(
         data["description"] = experiment.description
     if experiment.organism_type is not None:
         data["organism_type"] = experiment.organism_type
-    if experiment.parameters is not None:
-        data["parameters"] = experiment.parameters
+    if experiment.groups is not None:
+        data["groups"] = experiment.groups
+    if experiment.additional_parameters is not None:
+        data["additional_parameters"] = experiment.additional_parameters
     if experiment.logs is not None:
         data["logs"] = experiment.logs
     if experiment.peptides is not None:
         data["peptides"] = experiment.peptides
     if experiment.experiment_start is not None:
-        data["experiment_start"] = str(experiment.experiment_start)
+        data["experiment_start"] = ensure_utc(experiment.experiment_start).isoformat()
     if experiment.experiment_end is not None:
-        data["experiment_end"] = str(experiment.experiment_end)
+        data["experiment_end"] = ensure_utc(experiment.experiment_end).isoformat()
     if experiment.links is not None:
         data["links"] = experiment.links
     if experiment.olden_labs_study_id is not None:

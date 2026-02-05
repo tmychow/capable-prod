@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import NProgress from "nprogress";
 import { updateExperimentAction } from "@/app/experiments/actions";
 
@@ -22,6 +23,7 @@ const BIN_OPTIONS = [
 ];
 
 export function OldenLabsWidget({ experimentId, studyId, editMode = false }: OldenLabsWidgetProps) {
+  const router = useRouter();
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -109,13 +111,40 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
     if (!newStudyId.trim()) return;
 
     setLoading(true);
+    setError(null);
     NProgress.start();
     try {
+      // First check for duplicates and fetch data from Olden Labs
+      const params = new URLSearchParams({
+        study_id: newStudyId.trim(),
+        exclude_experiment_id: experimentId,
+      });
+      const syncRes = await fetch(`/api/oldenlabs/sync?${params}`);
+
+      if (syncRes.status === 409) {
+        // Duplicate study ID - don't save
+        const data = await syncRes.json();
+        setError(data.error);
+        return;
+      }
+
+      // No duplicate - save the study ID and sync data
+      const syncData = syncRes.ok ? await syncRes.json() : null;
+
       await updateExperimentAction(experimentId, {
         olden_labs_study_id: newStudyId.trim(),
+        ...(syncData && {
+          name: syncData.name || undefined,
+          description: syncData.description || undefined,
+          groups: syncData.groups?.length > 0 ? syncData.groups : undefined,
+          experiment_start: syncData.experiment_start || undefined,
+          organism_type: syncData.organism_type || undefined,
+        }),
       });
+
       setCurrentStudyId(parseInt(newStudyId.trim()));
       setIsEditingStudyId(false);
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save Study ID");
     } finally {
@@ -242,6 +271,11 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
         <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
           {isEditingStudyId ? (
             <div className="space-y-3">
+              {error && (
+                <div className="p-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">
                   Olden Labs Study ID
@@ -249,7 +283,10 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
                 <input
                   type="text"
                   value={newStudyId}
-                  onChange={(e) => setNewStudyId(e.target.value)}
+                  onChange={(e) => {
+                    setNewStudyId(e.target.value);
+                    setError(null);
+                  }}
                   placeholder="e.g., 1945"
                   className="w-full px-3 py-2 rounded-lg border border-yellow-300 dark:border-yellow-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-yellow-500 text-sm"
                 />
@@ -259,6 +296,7 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
                   onClick={() => {
                     setIsEditingStudyId(false);
                     setNewStudyId("");
+                    setError(null);
                   }}
                   disabled={loading}
                   className="px-3 py-1.5 text-sm rounded-lg border border-yellow-300 dark:border-yellow-700 hover:bg-yellow-100 dark:hover:bg-yellow-900/40 cursor-pointer text-yellow-800 dark:text-yellow-200"

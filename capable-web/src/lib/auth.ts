@@ -36,7 +36,7 @@ export async function login(
   return res.json();
 }
 
-// Session management via encrypted cookies
+// Session management via httpOnly cookies
 export async function createSession(
   accessToken: string,
   userId: string,

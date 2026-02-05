@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { encrypt, decrypt } from "@/lib/encryption";
 
 const COOKIE_NAME = "auth_session";
 
@@ -13,12 +12,12 @@ export async function GET() {
     return NextResponse.json({ session: null });
   }
 
-  const session = await decrypt(cookie.value);
-  if (!session) {
+  try {
+    const session = JSON.parse(cookie.value);
+    return NextResponse.json({ session });
+  } catch {
     return NextResponse.json({ session: null });
   }
-
-  return NextResponse.json({ session });
 }
 
 // POST - create session
@@ -30,14 +29,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
   }
 
-  const encrypted = await encrypt({
-    accessToken,
-    userId,
-    email,
-  });
-
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, encrypted, {
+  cookieStore.set(COOKIE_NAME, JSON.stringify({ accessToken, userId, email }), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

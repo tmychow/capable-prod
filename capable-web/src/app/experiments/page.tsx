@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getExperiments, formatDate, type Experiment } from "@/lib/api";
-import { getServerSession } from "@/lib/session";
-import { Markdown } from "@/components/Markdown";
+import { getExperiments, AuthError, type Experiment } from "@/lib/api";
+import { getServerSession, clearServerSession } from "@/lib/session";
+import { OldenLabsLogin } from "@/components/OldenLabsLogin";
+import { ExperimentsList } from "@/components/ExperimentsList";
 
 export default async function ExperimentsPage() {
   const session = await getServerSession();
@@ -17,6 +18,10 @@ export default async function ExperimentsPage() {
   try {
     experiments = await getExperiments(session.accessToken);
   } catch (e) {
+    if (e instanceof AuthError) {
+      await clearServerSession();
+      redirect("/login");
+    }
     error = e instanceof Error ? e.message : "Failed to load experiments";
   }
 
@@ -37,60 +42,17 @@ export default async function ExperimentsPage() {
         </Link>
       </div>
 
+      <OldenLabsLogin />
+
+      <div className="mt-6" />
+
       {error ? (
         <div className="border border-red-200 dark:border-red-800 rounded-lg p-6 bg-red-50 dark:bg-red-900/20">
           <p className="text-red-600 dark:text-red-400">{error}</p>
         </div>
-      ) : experiments.length === 0 ? (
-        <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-12 text-center">
-          <p className="text-zinc-500">No experiments yet</p>
-        </div>
       ) : (
-        <div className="grid gap-4">
-          {experiments.map((experiment) => (
-            <ExperimentCard key={experiment.id} experiment={experiment} />
-          ))}
-        </div>
+        <ExperimentsList experiments={experiments} />
       )}
     </div>
-  );
-}
-
-function ExperimentCard({ experiment }: { experiment: Experiment }) {
-  const hasEndTime = experiment.experiment_end !== null;
-
-  return (
-    <Link
-      href={`/experiments/${experiment.id}`}
-      className="block border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors"
-    >
-      <div className="flex justify-between items-start mb-2">
-        <h3 className="text-lg font-semibold">{experiment.name}</h3>
-        <span
-          className={`px-2 py-1 text-xs font-medium rounded-full ${
-            hasEndTime
-              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-              : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-          }`}
-        >
-          {hasEndTime ? "completed" : "running"}
-        </span>
-      </div>
-      <div className="text-zinc-600 dark:text-zinc-400 mb-2 line-clamp-2">
-        {experiment.description ? (
-          <Markdown>{experiment.description}</Markdown>
-        ) : (
-          <span className="italic text-zinc-500">No description</span>
-        )}
-      </div>
-      {experiment.organism_type && (
-        <p className="text-sm text-zinc-500 mb-2">
-          Organism: {experiment.organism_type}
-        </p>
-      )}
-      <p className="text-sm text-zinc-500">
-        Created {formatDate(experiment.row_created_at)}
-      </p>
-    </Link>
   );
 }

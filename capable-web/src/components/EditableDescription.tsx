@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import NProgress from "nprogress";
 import { Markdown } from "@/components/Markdown";
 import { updateExperimentAction } from "@/app/experiments/actions";
@@ -19,6 +19,13 @@ export function EditableDescription({
   const [isEditing, setIsEditing] = useState(false);
   const [description, setDescription] = useState(initialDescription || "");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editMode) {
+      setIsEditing(false);
+      setDescription(initialDescription || "");
+    }
+  }, [editMode, initialDescription]);
 
   const handleSave = async () => {
     setSaving(true);

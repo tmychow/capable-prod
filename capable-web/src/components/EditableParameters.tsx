@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import NProgress from "nprogress";
 import { updateExperimentAction } from "@/app/experiments/actions";
 
@@ -57,6 +57,13 @@ export function EditableParameters({
   );
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!editMode) {
+      setIsEditing(false);
+      setParameters(objectToParameters(initialParameters));
+    }
+  }, [editMode, initialParameters]);
+
   const addParameter = () => {
     setParameters([...parameters, { key: "", value: "" }]);
   };
@@ -76,7 +83,7 @@ export function EditableParameters({
     NProgress.start();
     try {
       await updateExperimentAction(experimentId, {
-        parameters: parametersToObject(parameters),
+        additional_parameters: parametersToObject(parameters),
       });
       setIsEditing(false);
     } catch (error) {
@@ -98,7 +105,7 @@ export function EditableParameters({
   return (
     <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold">Parameters</h2>
+        <h2 className="text-lg font-semibold">Additional Parameters</h2>
         {editMode && !isEditing && (
           <button
             onClick={() => setIsEditing(true)}

@@ -1,18 +1,40 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Custom error class for authentication failures
+export class AuthError extends Error {
+  constructor(message: string = "Authentication required") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
 export interface Experiment {
   id: string;
   row_created_at: string;
   name: string;
   description: string | null;
   organism_type: string | null;
-  parameters: Record<string, unknown> | null;
+  groups: ExperimentGroup[] | null;
+  additional_parameters: Record<string, unknown> | null;
   logs: Record<string, unknown>[] | null;
   peptides: string[] | null;
   experiment_start: string | null;
   experiment_end: string | null;
   links: Record<string, unknown> | null;
   olden_labs_study_id: number | null;
+}
+
+export interface ExperimentGroup {
+  name: string;
+  group_id: string;
+  num_cages: number | null;
+  num_animals: number | null;
+  cage_ids: string[];
+  treatment: string;
+  species: string;
+  strain: string;
+  dob: string;
+  sex: string;
 }
 
 export async function getExperiments(token?: string): Promise<Experiment[]> {
@@ -28,7 +50,7 @@ export async function getExperiments(token?: string): Promise<Experiment[]> {
 
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
-      throw new Error("Please log in to view experiments");
+      throw new AuthError();
     }
     throw new Error("Failed to fetch experiments");
   }
@@ -48,7 +70,7 @@ export async function getExperiment(id: string, token?: string): Promise<Experim
 
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
-      throw new Error("Please log in to view this experiment");
+      throw new AuthError();
     }
     throw new Error("Failed to fetch experiment");
   }
@@ -63,16 +85,38 @@ export function formatDate(dateString: string): string {
   });
 }
 
-export function formatTime(timeString: string | null): string {
-  if (!timeString) return "—";
-  return timeString;
+export function formatDateTime(dateTimeString: string | null): string {
+  if (!dateTimeString) return "—";
+  const date = new Date(dateTimeString);
+  if (isNaN(date.getTime())) return dateTimeString;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Convert an ISO datetime string to the format expected by datetime-local inputs (YYYY-MM-DDTHH:MM) */
+export function toDateTimeLocal(dateTimeString: string | null): string {
+  if (!dateTimeString) return "";
+  const date = new Date(dateTimeString);
+  if (isNaN(date.getTime())) return dateTimeString;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 export interface ExperimentInput {
   name: string;
   description?: string | null;
   organism_type?: string | null;
-  parameters?: Record<string, unknown> | null;
+  groups?: ExperimentGroup[] | null;
+  additional_parameters?: Record<string, unknown> | null;
   logs?: Record<string, unknown>[] | null;
   peptides?: string[] | null;
   experiment_start?: string | null;

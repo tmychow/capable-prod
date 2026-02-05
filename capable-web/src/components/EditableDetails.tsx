@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import NProgress from "nprogress";
 import { updateExperimentAction } from "@/app/experiments/actions";
-import { formatDate, formatTime } from "@/lib/api";
+import { formatDate, formatDateTime, toDateTimeLocal } from "@/lib/api";
 
 interface EditableDetailsProps {
   experimentId: string;
@@ -24,9 +24,18 @@ export function EditableDetails({
 }: EditableDetailsProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [organismType, setOrganismType] = useState(initialOrganismType || "");
-  const [experimentStart, setExperimentStart] = useState(initialExperimentStart || "");
-  const [experimentEnd, setExperimentEnd] = useState(initialExperimentEnd || "");
+  const [experimentStart, setExperimentStart] = useState(toDateTimeLocal(initialExperimentStart));
+  const [experimentEnd, setExperimentEnd] = useState(toDateTimeLocal(initialExperimentEnd));
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editMode) {
+      setIsEditing(false);
+      setOrganismType(initialOrganismType || "");
+      setExperimentStart(toDateTimeLocal(initialExperimentStart));
+      setExperimentEnd(toDateTimeLocal(initialExperimentEnd));
+    }
+  }, [editMode, initialOrganismType, initialExperimentStart, initialExperimentEnd]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -48,8 +57,8 @@ export function EditableDetails({
 
   const handleCancel = () => {
     setOrganismType(initialOrganismType || "");
-    setExperimentStart(initialExperimentStart || "");
-    setExperimentEnd(initialExperimentEnd || "");
+    setExperimentStart(toDateTimeLocal(initialExperimentStart));
+    setExperimentEnd(toDateTimeLocal(initialExperimentEnd));
     setIsEditing(false);
   };
 
@@ -98,20 +107,18 @@ export function EditableDetails({
             />
           </div>
           <div>
-            <label className="text-sm text-zinc-500 block mb-1">Start Time</label>
+            <label className="text-sm text-zinc-500 block mb-1">Start Date</label>
             <input
-              type="time"
-              step="1"
+              type="datetime-local"
               value={experimentStart}
               onChange={(e) => setExperimentStart(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             />
           </div>
           <div>
-            <label className="text-sm text-zinc-500 block mb-1">End Time</label>
+            <label className="text-sm text-zinc-500 block mb-1">End Date</label>
             <input
-              type="time"
-              step="1"
+              type="datetime-local"
               value={experimentEnd}
               onChange={(e) => setExperimentEnd(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
@@ -145,12 +152,12 @@ export function EditableDetails({
             <dd className="font-medium">{organismType || "—"}</dd>
           </div>
           <div>
-            <dt className="text-sm text-zinc-500">Start Time</dt>
-            <dd className="font-medium">{formatTime(experimentStart || null)}</dd>
+            <dt className="text-sm text-zinc-500">Start Date</dt>
+            <dd className="font-medium">{formatDateTime(experimentStart || null)}</dd>
           </div>
           <div>
-            <dt className="text-sm text-zinc-500">End Time</dt>
-            <dd className="font-medium">{formatTime(experimentEnd || null)}</dd>
+            <dt className="text-sm text-zinc-500">End Date</dt>
+            <dd className="font-medium">{formatDateTime(experimentEnd || null)}</dd>
           </div>
         </dl>
       )}

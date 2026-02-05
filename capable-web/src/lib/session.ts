@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { decrypt } from "./encryption";
+
+const COOKIE_NAME = "auth_session";
 
 export interface Session {
   accessToken: string;
@@ -9,20 +10,28 @@ export interface Session {
 
 export async function getServerSession(): Promise<Session | null> {
   const cookieStore = await cookies();
-  const cookie = cookieStore.get("auth_session");
+  const cookie = cookieStore.get(COOKIE_NAME);
 
   if (!cookie) {
     return null;
   }
 
-  const session = await decrypt(cookie.value);
-  if (!session) {
+  try {
+    const session = JSON.parse(cookie.value);
+    if (!session.accessToken || !session.userId || !session.email) {
+      return null;
+    }
+    return {
+      accessToken: session.accessToken,
+      userId: session.userId,
+      email: session.email,
+    };
+  } catch {
     return null;
   }
+}
 
-  return {
-    accessToken: session.accessToken as string,
-    userId: session.userId as string,
-    email: session.email as string,
-  };
+export async function clearServerSession(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete(COOKIE_NAME);
 }

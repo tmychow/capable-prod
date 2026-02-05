@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import NProgress from "nprogress";
 import { updateExperimentAction } from "@/app/experiments/actions";
 import { PeptideSelect } from "@/components/PeptideSelect";
@@ -37,6 +37,13 @@ export function EditablePeptides({
     return Array.from(combined).sort();
   });
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editMode) {
+      setIsEditing(false);
+      setSelectedPeptides(initialPeptides || []);
+    }
+  }, [editMode, initialPeptides]);
 
   const handleSave = async () => {
     setSaving(true);

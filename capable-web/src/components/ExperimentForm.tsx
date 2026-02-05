@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import NProgress from "nprogress";
-import type { Experiment, ExperimentInput } from "@/lib/api";
+import type { Experiment, ExperimentInput, ExperimentGroup } from "@/lib/api";
+import { toDateTimeLocal } from "@/lib/api";
 import { PeptideSelect } from "@/components/PeptideSelect";
+import { OrganismSelect } from "@/components/OrganismSelect";
+import { CageIdCell } from "@/components/CageIdCell";
 
 // Default peptides that are commonly used
 const DEFAULT_PEPTIDES = [
@@ -87,18 +91,125 @@ export default function ExperimentForm({
     return Array.from(combined).sort();
   });
   const [experimentStart, setExperimentStart] = useState(
-    experiment?.experiment_start || ""
+    toDateTimeLocal(experiment?.experiment_start || null)
   );
   const [experimentEnd, setExperimentEnd] = useState(
-    experiment?.experiment_end || ""
+    toDateTimeLocal(experiment?.experiment_end || null)
   );
   const [oldenLabsStudyId, setOldenLabsStudyId] = useState(
     experiment?.olden_labs_study_id?.toString() ?? ""
   );
+  const [oldenLabsAuth, setOldenLabsAuth] = useState<boolean | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [studyIdConflict, setStudyIdConflict] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function checkOldenLabsAuth() {
+      try {
+        const res = await fetch("/api/oldenlabs/auth");
+        const data = await res.json();
+        setOldenLabsAuth(data.authenticated);
+      } catch {
+        setOldenLabsAuth(false);
+      }
+    }
+    checkOldenLabsAuth();
+  }, []);
+
+  // Check for duplicate study ID when it changes
+  useEffect(() => {
+    if (!oldenLabsStudyId) {
+      setStudyIdConflict(null);
+      return;
+    }
+    const controller = new AbortController();
+    async function checkDuplicate() {
+      try {
+        const params = new URLSearchParams({ study_id: oldenLabsStudyId });
+        if (experiment?.id) params.set("exclude_experiment_id", experiment.id);
+        const res = await fetch(`/api/oldenlabs/sync?${params}`, {
+          signal: controller.signal,
+        });
+        if (res.status === 409) {
+          const data = await res.json();
+          setStudyIdConflict(data.error);
+        } else {
+          setStudyIdConflict(null);
+        }
+      } catch {
+        // Aborted or network error — ignore
+      }
+    }
+    const timeout = setTimeout(checkDuplicate, 500);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [oldenLabsStudyId, experiment?.id]);
+
+  const handleSync = async () => {
+    if (!oldenLabsStudyId) return;
+    setSyncing(true);
+    setError(null);
+    NProgress.start();
+    try {
+      const params = new URLSearchParams({ study_id: oldenLabsStudyId });
+      if (experiment?.id) params.set("exclude_experiment_id", experiment.id);
+      const res = await fetch(`/api/oldenlabs/sync?${params}`);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to sync from Olden Labs");
+      }
+      const data = await res.json();
+      if (data.name) setName(data.name);
+      if (data.description) setDescription(data.description);
+      if (data.experiment_start) setExperimentStart(data.experiment_start);
+      if (data.organism_type) setOrganismType(data.organism_type);
+      if (data.groups && data.groups.length > 0) setGroups(data.groups);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+      NProgress.done();
+    }
+  };
+
+  // Groups
+  const [groups, setGroups] = useState<ExperimentGroup[]>(experiment?.groups || []);
+
+  const EMPTY_GROUP: ExperimentGroup = {
+    name: "", group_id: "", num_cages: null, num_animals: null, cage_ids: [],
+    treatment: "", species: "", strain: "", dob: "", sex: "",
+  };
+
+  const GROUP_COLUMNS: { key: keyof ExperimentGroup; label: string; type: string }[] = [
+    { key: "name", label: "Name", type: "text" },
+    { key: "group_id", label: "ID", type: "text" },
+    { key: "num_cages", label: "No. of Cages", type: "number" },
+    { key: "num_animals", label: "No. of Animals", type: "number" },
+    { key: "cage_ids", label: "Cage IDs", type: "cage_ids" },
+    { key: "treatment", label: "Treatment", type: "text" },
+    { key: "species", label: "Species", type: "text" },
+    { key: "strain", label: "Strain", type: "text" },
+    { key: "dob", label: "DOB", type: "date" },
+    { key: "sex", label: "Sex", type: "select" },
+  ];
+
+  const addGroup = () => setGroups([...groups, { ...EMPTY_GROUP }]);
+  const removeGroup = (index: number) => setGroups(groups.filter((_, i) => i !== index));
+  const updateGroup = (index: number, key: keyof ExperimentGroup, value: string) => {
+    const updated = [...groups];
+    if (key === "num_cages" || key === "num_animals") {
+      updated[index] = { ...updated[index], [key]: value === "" ? null : Number(value) };
+    } else {
+      updated[index] = { ...updated[index], [key]: value };
+    }
+    setGroups(updated);
+  };
 
   // Parameters as array of key-value pairs (easier to edit than JSON)
   const [parameters, setParameters] = useState<Parameter[]>(
-    objectToParameters(experiment?.parameters || null)
+    objectToParameters(experiment?.additional_parameters || null)
   );
 
   // Add a new empty parameter row
@@ -118,8 +229,12 @@ export default function ExperimentForm({
     setParameters(updated);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (studyIdConflict) {
+      setError(studyIdConflict);
+      return;
+    }
     setError(null);
     setLoading(true);
     NProgress.start();
@@ -129,10 +244,11 @@ export default function ExperimentForm({
         name,
         description: description || null,
         organism_type: organismType || null,
+        groups: groups.length > 0 ? groups : null,
         peptides: selectedPeptides.length > 0 ? selectedPeptides : null,
         experiment_start: experimentStart || null,
         experiment_end: experimentEnd || null,
-        parameters: parametersToObject(parameters),
+        additional_parameters: parametersToObject(parameters),
         olden_labs_study_id: oldenLabsStudyId || null,
       };
 
@@ -153,6 +269,69 @@ export default function ExperimentForm({
           <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
         </div>
       )}
+
+      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 space-y-3">
+        <div>
+          <label htmlFor="oldenLabsStudyId" className="block text-sm font-medium mb-2">
+            Olden Labs Study ID
+          </label>
+          {oldenLabsAuth ? (
+            <>
+              <input
+                id="oldenLabsStudyId"
+                type="text"
+                value={oldenLabsStudyId}
+                onChange={(e) => setOldenLabsStudyId(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 1945"
+              />
+              {studyIdConflict ? (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {studyIdConflict}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-zinc-500">
+                  Link this experiment to an Olden Labs study to sync data
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              <Link href="/experiments" className="text-blue-600 dark:text-blue-400 hover:underline">
+                Sign in to Olden Labs
+              </Link>
+              {" "}on the experiments page to enter a Study ID.
+            </p>
+          )}
+        </div>
+        {oldenLabsAuth && (
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={!oldenLabsStudyId || syncing || !!studyIdConflict}
+            className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm font-medium disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={syncing ? "animate-spin" : ""}
+            >
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 16h5v5" />
+            </svg>
+            {syncing ? "Syncing..." : "Sync from Olden Labs"}
+          </button>
+        )}
+      </div>
 
       <div>
         <label htmlFor="name" className="block text-sm font-medium mb-2">
@@ -185,16 +364,12 @@ export default function ExperimentForm({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label htmlFor="organismType" className="block text-sm font-medium mb-2">
+          <label className="block text-sm font-medium mb-2">
             Organism Type
           </label>
-          <input
-            id="organismType"
-            type="text"
+          <OrganismSelect
             value={organismType}
-            onChange={(e) => setOrganismType(e.target.value)}
-            className="w-full px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="e.g., E. coli"
+            onChange={setOrganismType}
           />
         </div>
 
@@ -216,12 +391,11 @@ export default function ExperimentForm({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label htmlFor="experimentStart" className="block text-sm font-medium mb-2">
-            Start Time
+            Start Date
           </label>
           <input
             id="experimentStart"
-            type="time"
-            step="1"
+            type="datetime-local"
             value={experimentStart}
             onChange={(e) => setExperimentStart(e.target.value)}
             className="w-full px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -230,12 +404,11 @@ export default function ExperimentForm({
 
         <div>
           <label htmlFor="experimentEnd" className="block text-sm font-medium mb-2">
-            End Time
+            End Date
           </label>
           <input
             id="experimentEnd"
-            type="time"
-            step="1"
+            type="datetime-local"
             value={experimentEnd}
             onChange={(e) => setExperimentEnd(e.target.value)}
             className="w-full px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -243,27 +416,109 @@ export default function ExperimentForm({
         </div>
       </div>
 
+      {/* Groups */}
       <div>
-        <label htmlFor="oldenLabsStudyId" className="block text-sm font-medium mb-2">
-          Olden Labs Study ID
-        </label>
-        <input
-          id="oldenLabsStudyId"
-          type="text"
-          value={oldenLabsStudyId}
-          onChange={(e) => setOldenLabsStudyId(e.target.value)}
-          className="w-full px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="e.g., 1945"
-        />
-        <p className="mt-1 text-xs text-zinc-500">
-          Link this experiment to an Olden Labs study for data downloads
-        </p>
+        <div className="flex justify-between items-center mb-2">
+          <label className="block text-sm font-medium">Groups</label>
+          <button
+            type="button"
+            onClick={addGroup}
+            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            + Add Group
+          </button>
+        </div>
+
+        {groups.length === 0 ? (
+          <p className="text-sm text-zinc-500 italic">
+            No groups. Click &quot;Add Group&quot; to add one.
+          </p>
+        ) : (
+          <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                  {GROUP_COLUMNS.map((col) => (
+                    <th
+                      key={col.key}
+                      className="px-2 py-2 text-left text-xs font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap"
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  <th className="w-8" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {groups.map((group, index) => (
+                  <tr key={index}>
+                    {GROUP_COLUMNS.map((col) => (
+                      <td key={col.key} className="px-2 py-1.5">
+                        {col.type === "cage_ids" ? (
+                          <CageIdCell
+                            value={(group.cage_ids as string[]) || []}
+                            onChange={(cageIds) => {
+                              const updated = [...groups];
+                              updated[index] = { ...updated[index], cage_ids: cageIds };
+                              setGroups(updated);
+                            }}
+                          />
+                        ) : col.type === "select" ? (
+                          <select
+                            value={group[col.key]?.toString() ?? ""}
+                            onChange={(e) => updateGroup(index, col.key, e.target.value)}
+                            className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-w-[80px]"
+                          >
+                            <option value="">--</option>
+                            <option value="M">M</option>
+                            <option value="F">F</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        ) : (
+                          <input
+                            type={col.type}
+                            value={group[col.key]?.toString() ?? ""}
+                            onChange={(e) => updateGroup(index, col.key, e.target.value)}
+                            className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-w-[80px]"
+                          />
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-1 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => removeGroup(index)}
+                        className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
+                        title="Remove group"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Parameters as key-value pairs */}
       <div>
         <div className="flex justify-between items-center mb-2">
-          <label className="block text-sm font-medium">Parameters</label>
+          <label className="block text-sm font-medium">Additional Parameters</label>
           <button
             type="button"
             onClick={addParameter}
@@ -275,7 +530,7 @@ export default function ExperimentForm({
 
         {parameters.length === 0 ? (
           <p className="text-sm text-zinc-500 italic">
-            No parameters. Click &quot;Add Parameter&quot; to add one.
+            No additional parameters. Click &quot;Add Parameter&quot; to add one.
           </p>
         ) : (
           <div className="space-y-2">
@@ -325,7 +580,7 @@ export default function ExperimentForm({
       <div className="flex gap-4 pt-4">
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !!studyIdConflict}
           className="px-6 py-2 rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 font-medium disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
           {loading ? "Saving..." : submitLabel}
