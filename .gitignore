@@ -50,6 +50,6 @@ next-env.d.ts
 __pycache__
 .venv/
 *.csv
-!capable-exp/raw/nps_mastersheet_filtered_enriched.csv
-capable-exp/raw/peptides.html
+!experiment/raw/nps_mastersheet_filtered_enriched.csv
+experiment/raw/peptides.html
 *.png
