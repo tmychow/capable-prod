@@ -1,0 +1,37 @@
+run_name: nps-truncation-baseline
+
+stages:
+  prepare:
+    enabled: true
+  generate:
+    enabled: true
+  judge:
+    enabled: true
+  analyse:
+    enabled: true
+
+# Stage-specific settings.
+# The runner does not interpret these; stage files will read their own blocks.
+prepare:
+  # Example:
+  # input_dataset: ../capable-data/nps/latest.csv
+  mode: placeholder
+
+generate:
+  # Example:
+  # row_counts: [100, 200, 300]
+  # seeds: [100, 101, 102]
+  mode: placeholder
+
+judge:
+  # Example:
+  # rankings_files:
+  #   - runs/<run_id>/judge/rankings_isaak.csv
+  #   - runs/<run_id>/judge/rankings_noah.csv
+  mode: placeholder
+
+analyse:
+  # Example:
+  # outputs:
+  #   - elo_vs_n_results.png
+  mode: placeholder

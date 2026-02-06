@@ -1,0 +1,13 @@
+# Ignore everything under runs by default.
+*
+
+# Keep this file and run folders so allow-rules can apply.
+!.gitignore
+!*/
+
+# Inside each run folder, ignore everything...
+*/*
+
+# ...except the run metadata files we want in git.
+!*/config.yaml
+!*/run.json
