@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends
+import os
+
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.database import get_supabase
@@ -12,6 +14,7 @@ from api.schemas import (
     AuthResponse,
     ensure_utc,
 )
+from api.cron import run_pickup_cron
 
 app = FastAPI(
     title="Axonic API",
@@ -112,6 +115,7 @@ async def create_experiment(
         ),
         "links": experiment.links,
         "olden_labs_study_id": experiment.olden_labs_study_id,
+        "generated_links": experiment.generated_links,
     }
     data = {k: v for k, v in data.items() if v is not None}
     result = supabase.table("experiments").insert(data).execute()
@@ -173,6 +177,8 @@ async def update_experiment(
         data["links"] = experiment.links
     if experiment.olden_labs_study_id is not None:
         data["olden_labs_study_id"] = experiment.olden_labs_study_id
+    if experiment.generated_links is not None:
+        data["generated_links"] = experiment.generated_links
 
     if not data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -197,3 +203,16 @@ async def delete_experiment(experiment_id: str, user=Depends(get_current_user)):
     if not result.data:
         raise HTTPException(status_code=404, detail="Experiment not found")
     return {"message": "Experiment deleted"}
+
+
+# --- Cron ---
+
+
+@app.get("/cron/pickup-files")
+async def cron_pickup_files(request: Request):
+    # Verify Vercel cron secret
+    cron_secret = os.getenv("CRON_SECRET", "")
+    auth_header = request.headers.get("authorization", "")
+    if cron_secret and auth_header != f"Bearer {cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return await run_pickup_cron()

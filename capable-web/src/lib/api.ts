@@ -8,6 +8,8 @@ export class AuthError extends Error {
   }
 }
 
+export type GeneratedLink = Record<string, string>;
+
 export interface Experiment {
   id: string;
   row_created_at: string;
@@ -22,6 +24,7 @@ export interface Experiment {
   experiment_end: string | null;
   links: Record<string, unknown> | null;
   olden_labs_study_id: number | null;
+  generated_links: GeneratedLink[] | null;
 }
 
 export interface ExperimentGroup {
@@ -123,6 +126,7 @@ export interface ExperimentInput {
   experiment_end?: string | null;
   links?: Record<string, unknown> | null;
   olden_labs_study_id?: string | null;
+  generated_links?: GeneratedLink[] | null;
 }
 
 async function parseErrorResponse(res: Response, fallback: string): Promise<string> {

@@ -44,6 +44,7 @@ class ExperimentCreate(BaseModel):
     experiment_end: datetime | None = None
     links: dict[str, Any] | None = None
     olden_labs_study_id: int | None = None
+    generated_links: list[dict[str, Any]] | None = None
 
 
 class ExperimentUpdate(BaseModel):
@@ -58,6 +59,7 @@ class ExperimentUpdate(BaseModel):
     experiment_end: datetime | None = None
     links: dict[str, Any] | None = None
     olden_labs_study_id: int | None = None
+    generated_links: list[dict[str, Any]] | None = None
 
 
 class ExperimentResponse(BaseModel):
@@ -74,3 +76,4 @@ class ExperimentResponse(BaseModel):
     experiment_end: datetime | None = None
     links: dict[str, Any] | None = None
     olden_labs_study_id: int | None = None
+    generated_links: list[dict[str, Any]] | None = None

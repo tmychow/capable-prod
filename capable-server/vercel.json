@@ -1,4 +1,10 @@
 {
+    "crons": [
+        {
+            "path": "/cron/pickup-files",
+            "schedule": "*/5 * * * *"
+        }
+    ],
     "builds": [
         {
             "src": "api/index.py",

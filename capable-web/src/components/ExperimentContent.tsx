@@ -175,6 +175,46 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
             studyId={experiment.olden_labs_study_id}
             editMode={editMode}
           />
+
+          {experiment.generated_links && experiment.generated_links.length > 0 && (
+            <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
+              <h2 className="text-lg font-semibold mb-4">Generated Files</h2>
+              <div className="space-y-2">
+                {experiment.generated_links.map((link, index) => {
+                  const [label, url] = Object.entries(link)[0];
+                  return (
+                    <a
+                      key={index}
+                      href={url}
+                      download
+                      className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors group"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="text-green-600 dark:text-green-400 flex-shrink-0"
+                      >
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <path d="M12 18v-6" />
+                        <path d="m9 15 3 3 3-3" />
+                      </svg>
+                      <span className="text-sm font-medium truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                        {label}
+                      </span>
+                    </a>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </>
