@@ -40,6 +40,34 @@ export interface ExperimentGroup {
   sex: string;
 }
 
+export interface Peptide {
+  id: number;
+  created_at: string;
+  name: string;
+  sequence: string;
+  experiments: Record<string, string>[];
+}
+
+export async function getPeptides(token?: string): Promise<Peptide[]> {
+  const headers: HeadersInit = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE_URL}/peptides`, {
+    cache: "no-store",
+    headers,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new AuthError();
+    }
+    throw new Error("Failed to fetch peptides");
+  }
+  return res.json();
+}
+
 export async function getExperiments(token?: string): Promise<Experiment[]> {
   const headers: HeadersInit = {};
   if (token) {

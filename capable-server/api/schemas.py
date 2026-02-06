@@ -62,6 +62,19 @@ class ExperimentUpdate(BaseModel):
     generated_links: list[dict[str, Any]] | None = None
 
 
+# Peptide schemas
+class PeptideCreate(BaseModel):
+    name: str
+    sequence: str = ""
+    experiment_ids: list[str]
+
+
+class PeptideUpdate(BaseModel):
+    name: str | None = None
+    sequence: str | None = None
+    experiment_ids: list[str] | None = None
+
+
 class ExperimentResponse(BaseModel):
     id: UUID
     row_created_at: datetime

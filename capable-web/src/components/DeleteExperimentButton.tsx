@@ -32,7 +32,7 @@ export function DeleteExperimentButton({
     <>
       <button
         onClick={() => setShowConfirm(true)}
-        className="px-4 py-2 text-sm font-medium rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
+        className="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 cursor-pointer"
       >
         Delete
       </button>

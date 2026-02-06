@@ -3,6 +3,14 @@
         {
             "path": "/cron/pickup-files",
             "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/cron/sync-studies",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/cron/sync-peptides",
+            "schedule": "0 0 * * *"
         }
     ],
     "builds": [

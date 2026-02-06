@@ -79,8 +79,11 @@ export function OldenLabsLogin() {
         throw new Error(data.error || "Sync failed");
       }
 
-      setSyncResult(data.message);
-      if (data.created > 0) {
+      const count = data.created ?? 0;
+      setSyncResult(count > 0
+        ? `Synced ${count} new experiment${count === 1 ? "" : "s"}`
+        : data.message || "All studies already synced");
+      if (count > 0) {
         router.refresh();
       }
     } catch (err) {

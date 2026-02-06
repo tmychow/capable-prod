@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import NProgress from "nprogress";
 import { LogsTimeline } from "@/components/LogsTimeline";
 import { OldenLabsWidget } from "@/components/OldenLabsWidget";
@@ -18,13 +19,28 @@ interface ExperimentContentProps {
 }
 
 export function ExperimentContent({ experiment }: ExperimentContentProps) {
+  const router = useRouter();
   const [editMode, setEditMode] = useState(false);
   const [name, setName] = useState(experiment.name);
   const [savingName, setSavingName] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
   const [downloadToast, setDownloadToast] = useState<{ label: string; hiding: boolean } | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCompleted = experiment.experiment_end !== null;
+
+  const handleSyncFiles = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/oldenlabs/sync-files", { method: "POST" });
+      if (!res.ok) throw new Error("Sync failed");
+      router.refresh();
+    } catch {
+      // silently fail – user can retry
+    } finally {
+      setSyncing(false);
+    }
+  }, [router]);
 
   useEffect(() => {
     setName(experiment.name);
@@ -105,10 +121,6 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
           >
             {editMode ? "Done" : "Edit"}
           </button>
-          <DeleteExperimentButton
-            experimentId={experiment.id}
-            experimentName={experiment.name}
-          />
         </div>
       </div>
 
@@ -178,63 +190,97 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
             editMode={editMode}
           />
 
-          {experiment.generated_links && experiment.generated_links.length > 0 && (
-            <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
-              <h2 className="text-lg font-semibold mb-4">Generated Files</h2>
-              <div className="space-y-2">
-                {experiment.generated_links.map((link, index) => {
-                  const [label, url] = Object.entries(link)[0];
-                  return (
-                    <button
-                      key={index}
-                      onClick={async () => {
-                        if (toastTimeout.current) clearTimeout(toastTimeout.current);
-                        setDownloadToast({ label, hiding: false });
-                        toastTimeout.current = setTimeout(() => {
-                          setDownloadToast((prev) => prev ? { ...prev, hiding: true } : null);
-                          setTimeout(() => setDownloadToast(null), 400);
-                        }, 4500);
-                        const res = await fetch(url);
-                        const blob = await res.blob();
-                        const blobUrl = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = blobUrl;
-                        const path = new URL(url, window.location.origin).searchParams.get("path");
-                        a.download = path?.split("/").pop() || label;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        URL.revokeObjectURL(blobUrl);
-                      }}
-                      className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors group w-full text-left cursor-pointer"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="text-green-600 dark:text-green-400 flex-shrink-0"
-                      >
-                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <path d="M12 18v-6" />
-                        <path d="m9 15 3 3 3-3" />
-                      </svg>
-                      <span className="text-sm font-medium truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                        {label}
-                      </span>
-                    </button>
-                  );
-                })}
+          <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Generated Files</h2>
+                <button
+                  onClick={handleSyncFiles}
+                  disabled={syncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={syncing ? "animate-spin" : ""}
+                  >
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                    <path d="M21 3v5h-5" />
+                  </svg>
+                  {syncing ? "Syncing…" : "Sync Files"}
+                </button>
               </div>
+              {experiment.generated_links && experiment.generated_links.length > 0 ? (
+                <div className="space-y-2">
+                  {experiment.generated_links.map((link, index) => {
+                    const [label, url] = Object.entries(link)[0];
+                    return (
+                      <button
+                        key={index}
+                        onClick={async () => {
+                          if (toastTimeout.current) clearTimeout(toastTimeout.current);
+                          setDownloadToast({ label, hiding: false });
+                          toastTimeout.current = setTimeout(() => {
+                            setDownloadToast((prev) => prev ? { ...prev, hiding: true } : null);
+                            setTimeout(() => setDownloadToast(null), 400);
+                          }, 4500);
+                          const res = await fetch(url);
+                          const blob = await res.blob();
+                          const blobUrl = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = blobUrl;
+                          const path = new URL(url, window.location.origin).searchParams.get("path");
+                          a.download = path?.split("/").pop() || label;
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+                          URL.revokeObjectURL(blobUrl);
+                        }}
+                        title={label}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors group w-full text-left cursor-pointer"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="text-green-600 dark:text-green-400 flex-shrink-0"
+                        >
+                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <path d="M12 18v-6" />
+                          <path d="m9 15 3 3 3-3" />
+                        </svg>
+                        <span className="text-xs font-medium group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                          {label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">No files yet. Click Sync Files to check for new data.</p>
+              )}
             </section>
-          )}
         </div>
+      </div>
+
+      <div className="mt-12 pt-6 border-t border-zinc-200 dark:border-zinc-800">
+        <DeleteExperimentButton
+          experimentId={experiment.id}
+          experimentName={experiment.name}
+        />
       </div>
 
       {downloadToast && (

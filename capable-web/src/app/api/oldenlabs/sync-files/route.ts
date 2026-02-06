@@ -9,7 +9,7 @@ export async function POST() {
     headers.Authorization = `Bearer ${CRON_SECRET}`;
   }
 
-  const res = await fetch(`${API_BASE_URL}/cron/sync-studies`, { headers });
+  const res = await fetch(`${API_BASE_URL}/cron/pickup-files`, { headers });
 
   if (!res.ok) {
     const text = await res.text();

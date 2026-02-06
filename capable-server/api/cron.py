@@ -1,6 +1,7 @@
 import os
 import re
 import html
+import asyncio
 import hashlib
 import httpx
 from dataclasses import dataclass
@@ -78,24 +79,34 @@ def parse_notification(text: str) -> ParsedNotification:
 
 
 def build_label(parsed: ParsedNotification) -> str:
-    """Build a human-readable label from parsed notification data."""
+    """Build a human-readable label from parsed notification data.
+
+    Example output: "Jan 3 - Feb 6, 1 hour bin time, 34 days"
+    """
     parts = []
+    duration_str = ""
     if parsed.interval_from and parsed.interval_to:
         try:
-            dt_from = datetime.strptime(
-                parsed.interval_from, "%m/%d/%Y %H:%M"
-            )
-            dt_to = datetime.strptime(
-                parsed.interval_to, "%m/%d/%Y %H:%M"
-            )
+            dt_from = datetime.strptime(parsed.interval_from, "%m/%d/%Y %H:%M")
+            dt_to = datetime.strptime(parsed.interval_to, "%m/%d/%Y %H:%M")
             parts.append(
-                f"{dt_from.strftime('%b %d')} - "
-                f"{dt_to.strftime('%b %d, %Y')}"
+                f"{dt_from.strftime('%b %-d, %Y')} - "
+                f"{dt_to.strftime('%b %-d, %Y')}"
             )
+            delta = dt_to - dt_from
+            total_hours = delta.total_seconds() / 3600
+            if total_hours >= 24:
+                days = round(total_hours / 24)
+                duration_str = f"{days} day{'s' if days != 1 else ''}"
+            else:
+                hours = round(total_hours)
+                duration_str = f"{hours} hour{'s' if hours != 1 else ''}"
         except ValueError:
             parts.append(f"{parsed.interval_from} - {parsed.interval_to}")
     if parsed.bin_time:
-        parts.append(parsed.bin_time)
+        parts.append(f"{parsed.bin_time} bin time")
+    if duration_str:
+        parts.append(duration_str)
     if parts:
         return ", ".join(parts)
     return "Data Export"
@@ -112,6 +123,166 @@ def filename_from_s3_url(s3_url: str) -> str:
     return name
 
 
+async def run_sync_studies_cron():
+    """
+    Cron: fetch all studies from Olden Labs, compare against existing
+    experiments, and create new experiments for any unsynced studies.
+    """
+    if not OLDEN_LABS_EMAIL or not OLDEN_LABS_PASSWORD:
+        return {
+            "success": False,
+            "error": "OLDEN_LABS_EMAIL/PASSWORD not configured",
+        }
+
+    supabase = get_supabase_admin()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # 1. Login to Olden Labs
+        login_res = await client.post(
+            f"{OLDEN_LABS_BASE_URL}/user/login",
+            json={"email": OLDEN_LABS_EMAIL, "password": OLDEN_LABS_PASSWORD},
+        )
+        if login_res.status_code != 200:
+            return {
+                "success": False,
+                "error": f"OL login failed: {login_res.status_code}",
+            }
+        token = login_res.json().get("data", {}).get("accessToken")
+        if not token:
+            return {"success": False, "error": "OL login returned no token"}
+
+        ol_headers = {"Cookie": f"olden_labs={token}"}
+
+        # 2. Fetch all studies
+        studies_res = await client.get(
+            f"{OLDEN_LABS_BASE_URL}/study-monitoring/ol-study-list",
+            headers=ol_headers,
+        )
+        if studies_res.status_code != 200:
+            return {
+                "success": False,
+                "error": f"OL studies fetch failed: {studies_res.status_code}",
+            }
+
+        studies = studies_res.json()
+        if not isinstance(studies, list) or not studies:
+            return {
+                "success": True,
+                "created": 0,
+                "message": "No studies found",
+            }
+
+        # 3. Load existing experiments to find already-imported study IDs
+        experiments_result = (
+            supabase.table("experiments")
+            .select("id, olden_labs_study_id")
+            .execute()
+        )
+        existing_study_ids = {
+            exp["olden_labs_study_id"]
+            for exp in (experiments_result.data or [])
+            if exp.get("olden_labs_study_id") is not None
+        }
+
+        new_studies = [
+            s for s in studies if s.get("id") not in existing_study_ids
+        ]
+        if not new_studies:
+            return {
+                "success": True,
+                "created": 0,
+                "message": "All studies already synced",
+            }
+
+        created = []
+        errors = []
+
+        for study in new_studies:
+            try:
+                study_id = study["id"]
+                groups = None
+
+                # Fetch groups and cages for this study
+                try:
+                    detail_res, cages_res = await asyncio.gather(
+                        client.get(
+                            f"{OLDEN_LABS_BASE_URL}/study-monitoring/{study_id}/with-group-list",
+                            headers=ol_headers,
+                        ),
+                        client.get(
+                            f"{OLDEN_LABS_BASE_URL}/study-monitoring/ol-group-list-with-cages-by-study-id/{study_id}",
+                            headers=ol_headers,
+                        ),
+                    )
+
+                    if (
+                        detail_res.status_code == 200
+                        and cages_res.status_code == 200
+                    ):
+                        study_data = detail_res.json()
+                        cages_data = cages_res.json()
+
+                        # Build cage map: group id -> device UIDs
+                        cages_by_group = {}
+                        for cg in (
+                            cages_data if isinstance(cages_data, list) else []
+                        ):
+                            cages_by_group[cg["id"]] = [
+                                c["device_uid"]
+                                for c in (cg.get("cage_list") or [])
+                                if c.get("device_uid")
+                            ]
+
+                        group_list = study_data.get("groupList") or []
+                        groups = [
+                            {
+                                "name": g.get("name", ""),
+                                "group_id": g.get("code", ""),
+                                "num_cages": g.get("number_of_cages"),
+                                "num_animals": g.get("number_of_mice"),
+                                "cage_ids": cages_by_group.get(g["id"], []),
+                                "treatment": g.get("treatment", ""),
+                                "species": g.get("species", ""),
+                                "strain": g.get("strain", ""),
+                                "dob": g.get("date_of_birth", ""),
+                                "sex": g.get("sex", ""),
+                            }
+                            for g in group_list
+                        ]
+                except Exception:
+                    pass  # Continue without groups
+
+                # Format experiment_start from study create_date
+                create_date = study.get("create_date") or ""
+                experiment_start = create_date[:16] if create_date else None
+
+                exp_data = {
+                    "name": study.get("name") or f"Study {study_id}",
+                    "description": study.get("description"),
+                    "organism_type": "Mice",
+                    "olden_labs_study_id": study_id,
+                }
+                if experiment_start:
+                    exp_data["experiment_start"] = experiment_start
+                if groups:
+                    exp_data["groups"] = groups
+
+                supabase.table("experiments").insert(exp_data).execute()
+                created.append(exp_data["name"])
+
+            except Exception as e:
+                errors.append(
+                    f"Failed to create study {study.get('name', '?')}: {e}"
+                )
+
+    return {
+        "success": True,
+        "created": len(created),
+        "created_names": created,
+        "errors": errors if errors else None,
+    }
+
+
 async def run_pickup_cron():
     """
     Cron: fetch OL notifications, deduplicate via hashed_links,
@@ -119,10 +290,16 @@ async def run_pickup_cron():
     and update experiment generated_links.
     """
     if not OLDEN_LABS_EMAIL or not OLDEN_LABS_PASSWORD:
-        return {"success": False, "error": "OLDEN_LABS_EMAIL/PASSWORD not configured"}
+        return {
+            "success": False,
+            "error": "OLDEN_LABS_EMAIL/PASSWORD not configured",
+        }
 
     if not MODAL_UPLOAD_URL or not MODAL_DOWNLOAD_URL or not MODAL_STORAGE_KEY:
-        return {"success": False, "error": "MODAL_UPLOAD_URL/DOWNLOAD_URL/STORAGE_KEY not configured"}
+        return {
+            "success": False,
+            "error": "MODAL_UPLOAD_URL/DOWNLOAD_URL/STORAGE_KEY not configured",
+        }
 
     supabase = get_supabase_admin()
 
@@ -154,7 +331,11 @@ async def run_pickup_cron():
 
         notifications = res.json()
         if not isinstance(notifications, list) or not notifications:
-            return {"success": True, "processed": 0, "message": "No notifications"}
+            return {
+                "success": True,
+                "processed": 0,
+                "message": "No notifications",
+            }
 
         # 2. Load experiments for name matching
         experiments_result = (
@@ -163,7 +344,7 @@ async def run_pickup_cron():
             .execute()
         )
         exp_by_name = {}
-        for exp in (experiments_result.data or []):
+        for exp in experiments_result.data or []:
             exp_by_name[exp["name"].lower().strip()] = exp
 
         processed = 0
@@ -207,12 +388,16 @@ async def run_pickup_cron():
                 file_res = await client.get(parsed.s3_url, timeout=120)
                 if file_res.status_code != 200:
                     # Record hash so we don't retry expired links every cron run
-                    supabase.table("hashed-links").insert({
-                        "link": link_hash,
-                        "experiment_id": experiment_id,
-                        "s3_url": parsed.s3_url,
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    }).execute()
+                    supabase.table("hashed-links").insert(
+                        {
+                            "link": link_hash,
+                            "experiment_id": experiment_id,
+                            "s3_url": parsed.s3_url,
+                            "created_at": datetime.now(
+                                timezone.utc
+                            ).isoformat(),
+                        }
+                    ).execute()
                     errors.append(f"S3 download failed for {parsed.study_name}")
                     continue
 
@@ -264,12 +449,14 @@ async def run_pickup_cron():
                 ).eq("id", experiment_id).execute()
 
                 # 8. Record hash so we don't reprocess
-                supabase.table("hashed-links").insert({
-                    "link": link_hash,
-                    "experiment_id": experiment_id,
-                    "s3_url": parsed.s3_url,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }).execute()
+                supabase.table("hashed-links").insert(
+                    {
+                        "link": link_hash,
+                        "experiment_id": experiment_id,
+                        "s3_url": parsed.s3_url,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ).execute()
 
                 processed += 1
 

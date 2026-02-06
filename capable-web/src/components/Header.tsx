@@ -41,6 +41,12 @@ export default function Header() {
               >
                 Experiments
               </Link>
+              <Link
+                href="/peptides"
+                className="text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Peptides
+              </Link>
             </div>
           </div>
           <div className="flex items-center gap-4">
