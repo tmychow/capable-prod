@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import NProgress from "nprogress";
 import { LogsTimeline } from "@/components/LogsTimeline";
 import { OldenLabsWidget } from "@/components/OldenLabsWidget";
@@ -22,6 +22,8 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
   const [name, setName] = useState(experiment.name);
   const [savingName, setSavingName] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
+  const [downloadToast, setDownloadToast] = useState<{ label: string; hiding: boolean } | null>(null);
+  const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCompleted = experiment.experiment_end !== null;
 
   useEffect(() => {
@@ -183,11 +185,28 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
                 {experiment.generated_links.map((link, index) => {
                   const [label, url] = Object.entries(link)[0];
                   return (
-                    <a
+                    <button
                       key={index}
-                      href={url}
-                      download
-                      className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors group"
+                      onClick={async () => {
+                        if (toastTimeout.current) clearTimeout(toastTimeout.current);
+                        setDownloadToast({ label, hiding: false });
+                        toastTimeout.current = setTimeout(() => {
+                          setDownloadToast((prev) => prev ? { ...prev, hiding: true } : null);
+                          setTimeout(() => setDownloadToast(null), 400);
+                        }, 4500);
+                        const res = await fetch(url);
+                        const blob = await res.blob();
+                        const blobUrl = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = blobUrl;
+                        const path = new URL(url, window.location.origin).searchParams.get("path");
+                        a.download = path?.split("/").pop() || label;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(blobUrl);
+                      }}
+                      className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors group w-full text-left cursor-pointer"
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -209,7 +228,7 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
                       <span className="text-sm font-medium truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
                         {label}
                       </span>
-                    </a>
+                    </button>
                   );
                 })}
               </div>
@@ -217,6 +236,46 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
           )}
         </div>
       </div>
+
+      {downloadToast && (
+        <div
+          className="fixed top-6 left-0 right-0 flex justify-center z-50 pointer-events-none"
+        >
+          <div
+            className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-6 py-3.5 rounded-lg shadow-lg text-sm font-medium pointer-events-auto"
+            style={{
+              animation: downloadToast.hiding
+                ? "toastOut 0.4s ease-in forwards"
+                : "toastIn 0.4s ease-out forwards",
+            }}
+          >
+            Download {downloadToast.label} started
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes toastIn {
+          from {
+            opacity: 0;
+            transform: translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes toastOut {
+          from {
+            opacity: 1;
+            transform: translateY(0);
+          }
+          to {
+            opacity: 0;
+            transform: translateY(-20px);
+          }
+        }
+      `}</style>
     </>
   );
 }
