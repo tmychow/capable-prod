@@ -55,3 +55,6 @@ __pycache__
 !experiment/raw/nps_mastersheet_filtered_enriched.csv
 experiment/raw/peptides.html
 *.png
+
+
+local_datalake/
