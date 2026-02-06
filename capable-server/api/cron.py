@@ -12,7 +12,9 @@ from api.database import get_supabase_admin
 OLDEN_LABS_BASE_URL = "https://oldenlabs.com:8000"
 OLDEN_LABS_EMAIL = os.getenv("OLDEN_LABS_EMAIL", "")
 OLDEN_LABS_PASSWORD = os.getenv("OLDEN_LABS_PASSWORD", "")
-STORAGE_BUCKET = "experiment-files"
+MODAL_UPLOAD_URL = os.getenv("MODAL_UPLOAD_URL", "")
+MODAL_DOWNLOAD_URL = os.getenv("MODAL_DOWNLOAD_URL", "")
+MODAL_STORAGE_KEY = os.getenv("MODAL_STORAGE_KEY", "")
 
 
 def hash_link(link: str) -> str:
@@ -113,15 +115,18 @@ def filename_from_s3_url(s3_url: str) -> str:
 async def run_pickup_cron():
     """
     Cron: fetch OL notifications, deduplicate via hashed_links,
-    download new Excel files, upload to Supabase Storage,
+    download new Excel files, upload to Modal persistent storage,
     and update experiment generated_links.
     """
     if not OLDEN_LABS_EMAIL or not OLDEN_LABS_PASSWORD:
         return {"success": False, "error": "OLDEN_LABS_EMAIL/PASSWORD not configured"}
 
+    if not MODAL_UPLOAD_URL or not MODAL_DOWNLOAD_URL or not MODAL_STORAGE_KEY:
+        return {"success": False, "error": "MODAL_UPLOAD_URL/DOWNLOAD_URL/STORAGE_KEY not configured"}
+
     supabase = get_supabase_admin()
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         # 1. Login to Olden Labs to get a fresh token
         login_res = await client.post(
             f"{OLDEN_LABS_BASE_URL}/user/login",
@@ -199,7 +204,7 @@ async def run_pickup_cron():
                 experiment_id = exp["id"]
 
                 # 5. Download Excel from S3
-                file_res = await client.get(parsed.s3_url)
+                file_res = await client.get(parsed.s3_url, timeout=120)
                 if file_res.status_code != 200:
                     # Record hash so we don't retry expired links every cron run
                     supabase.table("hashed-links").insert({
@@ -214,21 +219,28 @@ async def run_pickup_cron():
                 filename = filename_from_s3_url(parsed.s3_url)
                 storage_path = f"{experiment_id}/{filename}"
 
-                # 6. Upload to Supabase Storage
-                supabase.storage.from_(STORAGE_BUCKET).upload(
-                    path=storage_path,
-                    file=file_res.content,
-                    file_options={
-                        "content-type": (
+                # 6. Upload to Modal persistent storage
+                upload_res = await client.post(
+                    MODAL_UPLOAD_URL,
+                    params={"path": storage_path},
+                    content=file_res.content,
+                    headers={
+                        "Content-Type": (
                             "application/vnd.openxmlformats-"
                             "officedocument.spreadsheetml.sheet"
                         ),
-                        "upsert": "true",
+                        "Authorization": f"Bearer {MODAL_STORAGE_KEY}",
                     },
+                    timeout=120,
                 )
-                public_url = supabase.storage.from_(
-                    STORAGE_BUCKET
-                ).get_public_url(storage_path)
+                if upload_res.status_code != 200:
+                    errors.append(
+                        f"Modal upload failed for {parsed.study_name}: "
+                        f"{upload_res.status_code}"
+                    )
+                    continue
+
+                public_url = f"/api/files?path={storage_path}"
 
                 # 7. Append to generated_links on experiment row
                 # Re-read to avoid stale data if multiple notifications

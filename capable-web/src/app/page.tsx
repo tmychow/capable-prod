@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getExperiments, type Experiment } from "@/lib/api";
+import { getExperiments, AuthError, type Experiment } from "@/lib/api";
 import { getServerSession } from "@/lib/session";
 import { ExperimentRow } from "@/components/ExperimentRow";
 
@@ -17,6 +17,9 @@ export default async function Home() {
   try {
     experiments = await getExperiments(session.accessToken);
   } catch (e) {
+    if (e instanceof AuthError) {
+      redirect("/api/auth/logout");
+    }
     error = e instanceof Error ? e.message : "Failed to load experiments";
   }
 
