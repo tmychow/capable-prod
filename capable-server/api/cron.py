@@ -256,8 +256,10 @@ async def run_sync_studies_cron():
                 create_date = study.get("create_date") or ""
                 experiment_start = create_date[:16] if create_date else None
 
+                study_name = study.get("name") or f"Study {study_id}"
                 exp_data = {
-                    "name": study.get("name") or f"Study {study_id}",
+                    "name": study_name,
+                    "olden_labs_original_name": study_name,
                     "description": study.get("description"),
                     "organism_type": "Mice",
                     "olden_labs_study_id": study_id,
@@ -340,12 +342,16 @@ async def run_pickup_cron():
         # 2. Load experiments for name matching
         experiments_result = (
             supabase.table("experiments")
-            .select("id, name, generated_links")
+            .select("id, name, olden_labs_original_name, generated_links")
             .execute()
         )
         exp_by_name = {}
+        exp_by_original_name = {}
         for exp in experiments_result.data or []:
             exp_by_name[exp["name"].lower().strip()] = exp
+            original = exp.get("olden_labs_original_name")
+            if original:
+                exp_by_original_name[original.lower().strip()] = exp
 
         processed = 0
         errors = []
@@ -377,8 +383,9 @@ async def run_pickup_cron():
                 if existing.data:
                     continue
 
-                # 4. Match to experiment by name
-                exp = exp_by_name.get(parsed.study_name.lower().strip())
+                # 4. Match to experiment by name, fall back to original OL name
+                study_key = parsed.study_name.lower().strip()
+                exp = exp_by_name.get(study_key) or exp_by_original_name.get(study_key)
                 if not exp:
                     continue
 
