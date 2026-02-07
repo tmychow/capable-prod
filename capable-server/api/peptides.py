@@ -27,6 +27,7 @@ Additional rules:
 - Compound names like "NPSv1-proKKv1" -> "NPSv1proKKv1"
 - If a bare name like "NPS" appears alongside versioned forms, use the versioned form
 - Freely floating numbers after a peptide name are version numbers, not doses (e.g. "OXN 2" -> "OXNv2", "NPS 3" -> "NPSv3"). This does NOT apply when the number has dosing units (e.g. "OXN 50nmol" — the 50 is a dose, not a version)
+- "NPSVv1" is NOT a valid peptide — the correct name is "NPSv1"
 - Return an empty array [] if no peptides are found
 - Return ONLY the JSON array, nothing else"""
 
