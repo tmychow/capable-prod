@@ -19,6 +19,7 @@ Additional rules:
 - "TAK", "TAK 861", or any TAK variant is always "TAK861"
 - "+" ALWAYS separates distinct peptides — split on "+" first, then parse each part independently (e.g. "TAK 861+NPS v5.2" -> ["TAK861", "NPSv5.2"])
 - "Orexin" = "OXN", "OXA" = "OXNA", "OXB" = "OXNB"
+- "NXN" peptides (e.g. "NXNv6") are NPS/OXN chimeras — keep them as "NXN" (do NOT split into NPS + OXN)
 - "+" separates distinct peptides
 - Preserve case for peptide base (e.g. "aMCH" stays "aMCH")
 - Strip dosages/units (e.g. "NPSv1-20/50/200nmol" -> "NPSv1")
