@@ -11,6 +11,7 @@ import { EditableParameters } from "@/components/EditableParameters";
 import { EditablePeptides } from "@/components/EditablePeptides";
 import { EditableDetails } from "@/components/EditableDetails";
 import { DeleteExperimentButton } from "@/components/DeleteExperimentButton";
+import { OldenLabsChart } from "@/components/OldenLabsChart";
 import { updateExperimentAction } from "@/app/experiments/actions";
 import type { Experiment } from "@/lib/api";
 
@@ -171,6 +172,7 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
               </div>
             </section>
           )}
+
         </div>
 
         <div className="space-y-6">
@@ -276,12 +278,18 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
         </div>
       </div>
 
-      <div className="mt-12 pt-6 border-t border-zinc-200 dark:border-zinc-800">
+      <div className="flex justify-end mt-4">
         <DeleteExperimentButton
           experimentId={experiment.id}
           experimentName={experiment.name}
         />
       </div>
+
+      {experiment.olden_labs_study_id && (
+        <div className="mt-8 pt-8 border-t border-zinc-200 dark:border-zinc-800">
+          <OldenLabsChart studyId={experiment.olden_labs_study_id} />
+        </div>
+      )}
 
       {downloadToast && (
         <div
