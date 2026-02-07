@@ -234,6 +234,9 @@ async def run_sync_studies_cron():
                             ]
 
                         group_list = study_data.get("groupList") or []
+                        # Fall back to cages endpoint when groupList is empty
+                        if not group_list and isinstance(cages_data, list):
+                            group_list = cages_data
                         groups = [
                             {
                                 "name": g.get("name", ""),

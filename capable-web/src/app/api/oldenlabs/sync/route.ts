@@ -117,8 +117,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Fall back to cages endpoint when groupList is empty
+    const groupList: OldenLabsGroup[] = (studyData.groupList as OldenLabsGroup[])?.length
+      ? studyData.groupList
+      : cagesData;
     // Map Olden Labs groups to our ExperimentGroup format
-    const groups = (studyData.groupList as OldenLabsGroup[]).map((g) => ({
+    const groups = groupList.map((g) => ({
       name: g.name || "",
       group_id: g.code || "",
       num_cages: g.number_of_cages,
