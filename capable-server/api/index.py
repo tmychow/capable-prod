@@ -173,9 +173,13 @@ async def update_experiment(
     if experiment.peptides is not None:
         data["peptides"] = experiment.peptides
     if experiment.experiment_start is not None:
-        data["experiment_start"] = ensure_utc(experiment.experiment_start).isoformat()
+        data["experiment_start"] = ensure_utc(
+            experiment.experiment_start
+        ).isoformat()
     if experiment.experiment_end is not None:
-        data["experiment_end"] = ensure_utc(experiment.experiment_end).isoformat()
+        data["experiment_end"] = ensure_utc(
+            experiment.experiment_end
+        ).isoformat()
     if experiment.links is not None:
         data["links"] = experiment.links
     if experiment.olden_labs_study_id is not None:
@@ -260,11 +264,17 @@ async def create_peptide(
             detail=f"Peptide '{peptide.name}' already exists",
         )
 
-    result = supabase.table("peptides").insert({
-        "name": peptide.name,
-        "sequence": peptide.sequence,
-        "experiments": experiments,
-    }).execute()
+    result = (
+        supabase.table("peptides")
+        .insert(
+            {
+                "name": peptide.name,
+                "sequence": peptide.sequence,
+                "experiments": experiments,
+            }
+        )
+        .execute()
+    )
 
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create peptide")
@@ -325,10 +335,7 @@ async def update_peptide(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     result = (
-        supabase.table("peptides")
-        .update(data)
-        .eq("id", peptide_id)
-        .execute()
+        supabase.table("peptides").update(data).eq("id", peptide_id).execute()
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Peptide not found")
@@ -338,9 +345,7 @@ async def update_peptide(
 @app.delete("/peptides/{peptide_id}")
 async def delete_peptide(peptide_id: int, user=Depends(get_current_user)):
     supabase = get_supabase()
-    result = (
-        supabase.table("peptides").delete().eq("id", peptide_id).execute()
-    )
+    result = supabase.table("peptides").delete().eq("id", peptide_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Peptide not found")
     return {"message": "Peptide deleted"}
