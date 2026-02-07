@@ -40,7 +40,16 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
       });
     }
 
-    return result.sort((a, b) => a.name.localeCompare(b.name));
+    // When searching, rank by name match first, then the rest.
+    // Within the same rank, sort alphabetically.
+    return result.sort((a, b) => {
+      if (q) {
+        const aName = a.name.toLowerCase().includes(q) ? 0 : 1;
+        const bName = b.name.toLowerCase().includes(q) ? 0 : 1;
+        if (aName !== bName) return aName - bName;
+      }
+      return a.name.localeCompare(b.name);
+    });
   }, [peptides, search]);
 
   async function handleSync(all: boolean = false) {

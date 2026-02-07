@@ -13,10 +13,11 @@ Extract peptide identifiers from this experiment name. Return a JSON array of pe
 
 Peptides are of the form: OXNv3.1 i.e. version number if available. We mostly look at orexin and NPS. Orexins are OXNB if not stated otherwise.
 
-Don't use hyphens and underscores. Keep version numbers attached to compound names with no spaces (e.g. "NPSv2", "OXNv3.1", "aMCHv1", "TAK681").
+Don't use hyphens and underscores. Keep version numbers attached to compound names with no spaces (e.g. "NPSv2", "OXNv3.1", "aMCHv1", "TAK861").
 
 Additional rules:
-- "TAK", "TAK 861", or any TAK variant is always "TAK681"
+- "TAK", "TAK 861", or any TAK variant is always "TAK861"
+- "+" ALWAYS separates distinct peptides — split on "+" first, then parse each part independently (e.g. "TAK 861+NPS v5.2" -> ["TAK861", "NPSv5.2"])
 - "Orexin" = "OXN", "OXA" = "OXNA", "OXB" = "OXNB"
 - "+" separates distinct peptides
 - Preserve case for peptide base (e.g. "aMCH" stays "aMCH")

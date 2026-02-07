@@ -71,8 +71,19 @@ export function ExperimentsList({ experiments }: ExperimentsListProps) {
       });
     }
 
-    // Sort by experiment_start date (most recent first), experiments without start date go last
+    // When searching, rank by name match first, then description, then the rest.
+    // Within the same rank, sort by experiment_start date (most recent first).
     return [...filtered].sort((a, b) => {
+      if (q) {
+        const aName = a.name.toLowerCase().includes(q) ? 0 : 1;
+        const bName = b.name.toLowerCase().includes(q) ? 0 : 1;
+        if (aName !== bName) return aName - bName;
+
+        const aDesc = a.description?.toLowerCase().includes(q) ? 0 : 1;
+        const bDesc = b.description?.toLowerCase().includes(q) ? 0 : 1;
+        if (aDesc !== bDesc) return aDesc - bDesc;
+      }
+
       if (!a.experiment_start && !b.experiment_start) return 0;
       if (!a.experiment_start) return 1;
       if (!b.experiment_start) return -1;
