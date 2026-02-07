@@ -15,6 +15,7 @@ interface EditableGroupsProps {
 const EMPTY_GROUP: ExperimentGroup = {
   name: "",
   group_id: "",
+  group_name: "",
   num_cages: null,
   num_animals: null,
   cage_ids: [],
@@ -27,7 +28,8 @@ const EMPTY_GROUP: ExperimentGroup = {
 
 const COLUMNS: { key: keyof ExperimentGroup; label: string; type: string }[] = [
   { key: "name", label: "Name", type: "text" },
-  { key: "group_id", label: "ID", type: "text" },
+  { key: "group_id", label: "Group ID", type: "text" },
+  { key: "group_name", label: "Group Name", type: "text" },
   { key: "num_cages", label: "No. of Cages", type: "number" },
   { key: "num_animals", label: "No. of Animals", type: "number" },
   { key: "cage_ids", label: "Cage IDs", type: "cage_ids" },

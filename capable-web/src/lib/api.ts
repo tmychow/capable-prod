@@ -30,6 +30,7 @@ export interface Experiment {
 export interface ExperimentGroup {
   name: string;
   group_id: string;
+  group_name: string;
   num_cages: number | null;
   num_animals: number | null;
   cage_ids: string[];

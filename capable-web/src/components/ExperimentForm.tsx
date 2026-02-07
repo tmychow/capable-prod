@@ -178,13 +178,14 @@ export default function ExperimentForm({
   const [groups, setGroups] = useState<ExperimentGroup[]>(experiment?.groups || []);
 
   const EMPTY_GROUP: ExperimentGroup = {
-    name: "", group_id: "", num_cages: null, num_animals: null, cage_ids: [],
+    name: "", group_id: "", group_name: "", num_cages: null, num_animals: null, cage_ids: [],
     treatment: "", species: "", strain: "", dob: "", sex: "",
   };
 
   const GROUP_COLUMNS: { key: keyof ExperimentGroup; label: string; type: string }[] = [
     { key: "name", label: "Name", type: "text" },
-    { key: "group_id", label: "ID", type: "text" },
+    { key: "group_id", label: "Group ID", type: "text" },
+    { key: "group_name", label: "Group Name", type: "text" },
     { key: "num_cages", label: "No. of Cages", type: "number" },
     { key: "num_animals", label: "No. of Animals", type: "number" },
     { key: "cage_ids", label: "Cage IDs", type: "cage_ids" },

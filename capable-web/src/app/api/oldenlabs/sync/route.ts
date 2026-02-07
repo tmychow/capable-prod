@@ -124,7 +124,8 @@ export async function GET(request: NextRequest) {
     // Map Olden Labs groups to our ExperimentGroup format
     const groups = groupList.map((g) => ({
       name: g.name || "",
-      group_id: g.code || "",
+      group_id: String(g.id),
+      group_name: g.code || "",
       num_cages: g.number_of_cages,
       num_animals: g.number_of_mice,
       cage_ids: cagesByGroupId.get(g.id) || [],

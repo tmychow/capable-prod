@@ -240,7 +240,8 @@ async def run_sync_studies_cron():
                         groups = [
                             {
                                 "name": g.get("name", ""),
-                                "group_id": g.get("code", ""),
+                                "group_id": str(g.get("id", "")),
+                                "group_name": g.get("code", ""),
                                 "num_cages": g.get("number_of_cages"),
                                 "num_animals": g.get("number_of_mice"),
                                 "cage_ids": cages_by_group.get(g["id"], []),

@@ -14,6 +14,7 @@ import {
 
 interface OldenLabsChartProps {
   studyId: number;
+  groupIds?: string[];
 }
 
 const BIN_OPTIONS = [
@@ -78,6 +79,104 @@ function formatTime(time: string): string {
   }
 }
 
+/* ── ANOVA helpers ────────────────────────────────────────────────── */
+
+function lnGamma(z: number): number {
+  if (z <= 0) return Infinity;
+  const c = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  if (z < 0.5) {
+    return Math.log(Math.PI / Math.sin(Math.PI * z)) - lnGamma(1 - z);
+  }
+  z -= 1;
+  let x = c[0];
+  for (let i = 1; i < 9; i++) x += c[i] / (z + i);
+  const t = z + 7.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+
+function betaCf(a: number, b: number, x: number): number {
+  const MAXIT = 200, EPS = 3e-14, FPMIN = 1e-30;
+  const qab = a + b, qap = a + 1, qam = a - 1;
+  let c = 1, d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < FPMIN) d = FPMIN;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d; h *= d * c;
+    aa = -((a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c; h *= del;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  return h;
+}
+
+function regIncBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bt = Math.exp(
+    lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x),
+  );
+  if (x < (a + 1) / (a + b + 2)) return (bt * betaCf(a, b, x)) / a;
+  return 1 - (bt * betaCf(b, a, 1 - x)) / b;
+}
+
+function fDistCdf(x: number, d1: number, d2: number): number {
+  if (x <= 0) return 0;
+  return regIncBeta((d1 * x) / (d1 * x + d2), d1 / 2, d2 / 2);
+}
+
+/**
+ * One-way ANOVA across groups for a single chart.
+ * `groupData` is an array (one per group) of number arrays (all valid observations for that group).
+ */
+function computeAnova(groupData: number[][]): { pValue: number; fStat: number } | null {
+  const groups = groupData.filter((g) => g.length > 0);
+  const k = groups.length;
+  if (k < 2) return null;
+
+  const N = groups.reduce((s, g) => s + g.length, 0);
+  if (N <= k) return null;
+
+  const grandMean = groups.reduce((s, g) => s + g.reduce((a, v) => a + v, 0), 0) / N;
+
+  let ssBetween = 0;
+  let ssWithin = 0;
+  for (const g of groups) {
+    const gMean = g.reduce((a, v) => a + v, 0) / g.length;
+    ssBetween += g.length * (gMean - grandMean) ** 2;
+    for (const v of g) ssWithin += (v - gMean) ** 2;
+  }
+
+  const dfBetween = k - 1;
+  const dfWithin = N - k;
+  if (dfWithin <= 0 || ssWithin === 0) return null;
+
+  const fStat = (ssBetween / dfBetween) / (ssWithin / dfWithin);
+  const pValue = 1 - fDistCdf(fStat, dfBetween, dfWithin);
+
+  return { fStat, pValue };
+}
+
+function formatPValue(p: number): string {
+  if (p < 0.001) return "p < 0.001 (***)";
+  if (p < 0.01) return `p = ${p.toFixed(4)} (**)`;
+  if (p < 0.05) return `p = ${p.toFixed(3)} (*)`;
+  return `p = ${p.toFixed(3)}`;
+}
+
+/* ── end ANOVA helpers ───────────────────────────────────────────── */
+
 const INITIAL_VISIBLE = 5;
 
 // Sort so "Cage in rack" goes to the bottom
@@ -89,11 +188,14 @@ function sortCharts(charts: OldenLabsChartData[]): OldenLabsChartData[] {
   });
 }
 
-export function OldenLabsChart({ studyId }: OldenLabsChartProps) {
+export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [charts, setCharts] = useState<OldenLabsChartData[] | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  // Map from chart_number -> ANOVA result
+  const [anovaResults, setAnovaResults] = useState<Record<number, { pValue: number; fStat: number } | null>>({});
+  const [anovaLoading, setAnovaLoading] = useState(false);
 
   const now = new Date();
   const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
@@ -104,6 +206,7 @@ export function OldenLabsChart({ studyId }: OldenLabsChartProps) {
   const loadCharts = useCallback(async (start: string, end: string, bin: string) => {
     setError(null);
     setLoading(true);
+    setAnovaResults({});
 
     try {
       const params = new URLSearchParams({
@@ -122,20 +225,82 @@ export function OldenLabsChart({ studyId }: OldenLabsChartProps) {
         throw new Error(data.error || "Failed to fetch chart data");
       }
 
-      const chartArray = Array.isArray(data) ? data : [data];
+      const chartArray: OldenLabsChartData[] = Array.isArray(data) ? data : [data];
       if (chartArray.length === 0) {
         setError("No chart data available for the selected time range.");
         return;
       }
 
-      setCharts(sortCharts(chartArray));
+      const sorted = sortCharts(chartArray);
+      setCharts(sorted);
       setVisibleCount(INITIAL_VISIBLE);
+
+      // Fetch per-group data for ANOVA if we have group IDs
+      if (groupIds.length >= 2) {
+        setAnovaLoading(true);
+        try {
+          const groupChartResponses = await Promise.all(
+            groupIds.map(async (gid) => {
+              const gParams = new URLSearchParams({
+                study_id: String(studyId),
+                group_id: gid,
+                start_time: start,
+                end_time: end,
+                group_by: bin,
+                chart_type: "LineChart",
+                error_bar_type: "SEM",
+              });
+              const gRes = await fetch(`/api/oldenlabs/chart-group?${gParams}`);
+              if (!gRes.ok) return null;
+              const gData = await gRes.json();
+              return Array.isArray(gData) ? gData as OldenLabsChartData[] : [gData] as OldenLabsChartData[];
+            })
+          );
+
+          // Build: chart_number -> array of number[] (one per group)
+          // Each group's data is all non-null values across all datasets and time points
+          const chartNumbers = new Set(sorted.map((c) => c.chart_number));
+          const results: Record<number, { pValue: number; fStat: number } | null> = {};
+
+          for (const cn of chartNumbers) {
+            const groupDataArrays: number[][] = [];
+
+            for (const groupCharts of groupChartResponses) {
+              if (!groupCharts) {
+                groupDataArrays.push([]);
+                continue;
+              }
+              const chart = groupCharts.find((c) => c.chart_number === cn);
+              if (!chart) {
+                groupDataArrays.push([]);
+                continue;
+              }
+              // Pool all non-null data points across all datasets (cages) in this group
+              const values: number[] = [];
+              for (const ds of chart.datasets) {
+                for (const v of ds.data) {
+                  if (v !== null && !isNaN(v)) values.push(v);
+                }
+              }
+              groupDataArrays.push(values);
+            }
+
+            results[cn] = computeAnova(groupDataArrays);
+          }
+
+          setAnovaResults(results);
+        } catch (e) {
+          console.error("ANOVA computation failed:", e);
+        } finally {
+          setAnovaLoading(false);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load chart");
     } finally {
       setLoading(false);
     }
-  }, [studyId]);
+  }, [studyId, groupIds]);
 
   // Auto-load on mount
   useEffect(() => {
@@ -229,6 +394,7 @@ export function OldenLabsChart({ studyId }: OldenLabsChartProps) {
             <>
               {visible.map((chart) => {
                 const { data, seriesKeys } = transformChart(chart);
+                const anova = anovaResults[chart.chart_number];
                 return (
                   <div key={chart.chart_number} className="mt-8 pt-6 border-t border-zinc-100 dark:border-zinc-800/60">
                     <div className="mb-4">
@@ -286,6 +452,23 @@ export function OldenLabsChart({ studyId }: OldenLabsChartProps) {
                         ))}
                       </LineChart>
                     </ResponsiveContainer>
+                    <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      {anovaLoading ? (
+                        <span className="italic">Computing ANOVA...</span>
+                      ) : anova ? (
+                        <span>
+                          Chart ANOVA p-value:{" "}
+                          <span className={anova.pValue < 0.05 ? "font-semibold text-zinc-700 dark:text-zinc-200" : ""}>
+                            {formatPValue(anova.pValue)}
+                          </span>
+                          <span className="ml-2 text-zinc-400">F = {anova.fStat.toFixed(2)}</span>
+                        </span>
+                      ) : groupIds.length < 2 ? (
+                        <span className="italic">ANOVA requires at least 2 groups</span>
+                      ) : (
+                        <span className="italic">ANOVA: insufficient data</span>
+                      )}
+                    </div>
                   </div>
                 );
               })}

@@ -287,7 +287,7 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
 
       {experiment.olden_labs_study_id && (
         <div className="mt-8 pt-8 border-t border-zinc-200 dark:border-zinc-800">
-          <OldenLabsChart studyId={experiment.olden_labs_study_id} />
+          <OldenLabsChart studyId={experiment.olden_labs_study_id} groupIds={(experiment.groups || []).map(g => g.group_id).filter(Boolean)} />
         </div>
       )}
 
