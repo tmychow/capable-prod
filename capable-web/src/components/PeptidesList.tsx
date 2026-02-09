@@ -18,6 +18,7 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
   const router = useRouter();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [syncing, setSyncing] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -85,6 +86,36 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
     }
   }
 
+  async function handleBackfill() {
+    setBackfilling(true);
+    setError(null);
+    setSyncResult(null);
+    NProgress.start();
+
+    try {
+      const res = await fetch("/api/peptides/backfill", { method: "POST" });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Backfill failed");
+      }
+
+      const updated = data.updated_experiments ?? 0;
+      const unchanged = data.unchanged_experiments ?? 0;
+      const unresolved = data.unresolved_links ?? 0;
+      const unresolvedText = unresolved > 0 ? `, unresolved links ${unresolved}` : "";
+      setSyncResult(
+        `Backfilled experiments: updated ${updated}, unchanged ${unchanged}${unresolvedText}`
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Backfill failed");
+    } finally {
+      setBackfilling(false);
+      NProgress.done();
+    }
+  }
+
   const syncIcon = (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -113,7 +144,7 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
           <button
             type="button"
             onClick={() => handleSync(false)}
-            disabled={syncing}
+            disabled={syncing || backfilling}
             className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {syncIcon}
@@ -123,10 +154,19 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
           <button
             type="button"
             onClick={() => handleSync(true)}
-            disabled={syncing}
+            disabled={syncing || backfilling}
             className="px-3 py-2 rounded-lg text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
           >
             {syncing ? "Syncing..." : "Sync All"}
+          </button>
+          <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-700" />
+          <button
+            type="button"
+            onClick={handleBackfill}
+            disabled={syncing || backfilling}
+            className="px-3 py-2 rounded-lg text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+          >
+            {backfilling ? "Backfilling..." : "Backfill Experiments"}
           </button>
           <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-700" />
           <button

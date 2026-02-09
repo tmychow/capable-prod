@@ -17,7 +17,11 @@ from api.schemas import (
     ensure_utc,
 )
 from api.cron import run_pickup_cron, run_sync_studies_cron
-from api.peptides import run_sync_peptides_cron
+from api.peptides import (
+    run_sync_peptides_cron,
+    run_backfill_experiment_peptides,
+    sync_experiment_peptides_for_experiment_ids,
+)
 
 app = FastAPI(
     title="Axonic API",
@@ -35,6 +39,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _extract_linked_experiment_ids(value: object) -> set[str]:
+    ids: set[str] = set()
+    if not isinstance(value, list):
+        return ids
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        for exp_id_raw in entry.values():
+            exp_id = str(exp_id_raw or "").strip()
+            if exp_id:
+                ids.add(exp_id)
+    return ids
 
 
 @app.get("/")
@@ -278,6 +296,15 @@ async def create_peptide(
 
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create peptide")
+
+    try:
+        await sync_experiment_peptides_for_experiment_ids(
+            sorted({str(exp_id).strip() for exp_id in peptide.experiment_ids if str(exp_id).strip()})
+        )
+    except Exception:
+        # Avoid failing create after DB write; consistency can be repaired by backfill endpoint.
+        pass
+
     return result.data[0]
 
 
@@ -288,6 +315,19 @@ async def update_peptide(
     user=Depends(get_current_user),
 ):
     supabase = get_supabase()
+    existing_row = (
+        supabase.table("peptides")
+        .select("id, experiments")
+        .eq("id", peptide_id)
+        .execute()
+    )
+    if not existing_row.data:
+        raise HTTPException(status_code=404, detail="Peptide not found")
+
+    previous_experiment_ids = _extract_linked_experiment_ids(
+        existing_row.data[0].get("experiments")
+    )
+
     data = {}
 
     if peptide.name is not None:
@@ -339,15 +379,50 @@ async def update_peptide(
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Peptide not found")
+
+    current_experiment_ids = (
+        {str(exp_id).strip() for exp_id in peptide.experiment_ids if str(exp_id).strip()}
+        if peptide.experiment_ids is not None
+        else previous_experiment_ids
+    )
+    affected_experiment_ids = sorted(previous_experiment_ids | current_experiment_ids)
+
+    if affected_experiment_ids:
+        try:
+            await sync_experiment_peptides_for_experiment_ids(affected_experiment_ids)
+        except Exception:
+            # Avoid failing update after DB write; consistency can be repaired by backfill endpoint.
+            pass
+
     return result.data[0]
 
 
 @app.delete("/peptides/{peptide_id}")
 async def delete_peptide(peptide_id: int, user=Depends(get_current_user)):
     supabase = get_supabase()
+    existing_row = (
+        supabase.table("peptides")
+        .select("id, experiments")
+        .eq("id", peptide_id)
+        .execute()
+    )
+    if not existing_row.data:
+        raise HTTPException(status_code=404, detail="Peptide not found")
+    affected_experiment_ids = sorted(
+        _extract_linked_experiment_ids(existing_row.data[0].get("experiments"))
+    )
+
     result = supabase.table("peptides").delete().eq("id", peptide_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Peptide not found")
+
+    if affected_experiment_ids:
+        try:
+            await sync_experiment_peptides_for_experiment_ids(affected_experiment_ids)
+        except Exception:
+            # Avoid failing delete after DB write; consistency can be repaired by backfill endpoint.
+            pass
+
     return {"message": "Peptide deleted"}
 
 
@@ -382,3 +457,13 @@ async def cron_sync_peptides(request: Request, limit: int | None = None):
     if cron_secret and auth_header != f"Bearer {cron_secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
     return await run_sync_peptides_cron(limit=limit)
+
+
+@app.get("/cron/backfill-experiment-peptides")
+async def cron_backfill_experiment_peptides(request: Request):
+    # Verify Vercel cron secret
+    cron_secret = os.getenv("CRON_SECRET", "")
+    auth_header = request.headers.get("authorization", "")
+    if cron_secret and auth_header != f"Bearer {cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return await run_backfill_experiment_peptides()
