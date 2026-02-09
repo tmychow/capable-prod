@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getExperiment, AuthError } from "@/lib/api";
+import { getExperiment, getPeptides, AuthError } from "@/lib/api";
 import { getServerSession } from "@/lib/session";
 import { ExperimentContent } from "@/components/ExperimentContent";
 
@@ -17,6 +17,7 @@ export default async function ExperimentDetailPage({
   }
 
   let experiment;
+  let peptideIdByName: Record<string, string> = {};
   let error: string | null = null;
 
   try {
@@ -26,6 +27,22 @@ export default async function ExperimentDetailPage({
       redirect("/api/auth/logout");
     }
     error = e instanceof Error ? e.message : "Failed to load experiment";
+  }
+
+  if (experiment) {
+    try {
+      const peptides = await getPeptides(session.accessToken);
+      peptideIdByName = Object.fromEntries(
+        peptides.flatMap((peptide) => [
+          [peptide.name, String(peptide.id)],
+          [peptide.name.toLowerCase(), String(peptide.id)],
+        ])
+      );
+    } catch (e) {
+      if (e instanceof AuthError) {
+        redirect("/api/auth/logout");
+      }
+    }
   }
 
   if (error || !experiment) {
@@ -59,7 +76,10 @@ export default async function ExperimentDetailPage({
         </Link>
       </div>
 
-      <ExperimentContent experiment={experiment} />
+      <ExperimentContent
+        experiment={experiment}
+        peptideIdByName={peptideIdByName}
+      />
     </div>
   );
 }

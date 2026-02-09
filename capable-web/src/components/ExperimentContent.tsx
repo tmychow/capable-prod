@@ -17,9 +17,13 @@ import type { Experiment } from "@/lib/api";
 
 interface ExperimentContentProps {
   experiment: Experiment;
+  peptideIdByName?: Record<string, string>;
 }
 
-export function ExperimentContent({ experiment }: ExperimentContentProps) {
+export function ExperimentContent({
+  experiment,
+  peptideIdByName,
+}: ExperimentContentProps) {
   const router = useRouter();
   const [editMode, setEditMode] = useState(false);
   const [name, setName] = useState(experiment.name);
@@ -145,6 +149,7 @@ export function ExperimentContent({ experiment }: ExperimentContentProps) {
             key={`peptides-${dataVersion}`}
             experimentId={experiment.id}
             initialPeptides={experiment.peptides}
+            peptideIdByName={peptideIdByName}
             editMode={editMode}
           />
 

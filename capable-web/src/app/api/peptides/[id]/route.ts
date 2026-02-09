@@ -46,6 +46,35 @@ export async function PUT(
   return NextResponse.json(data);
 }
 
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const token = await getToken();
+  if (!token) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { id } = await params;
+
+  const res = await fetch(`${API_BASE_URL}/peptides/${id}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: "Request failed" }));
+    return NextResponse.json(
+      { error: data.detail || "Failed to fetch peptide" },
+      { status: res.status }
+    );
+  }
+
+  const data = await res.json();
+  return NextResponse.json(data);
+}
+
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

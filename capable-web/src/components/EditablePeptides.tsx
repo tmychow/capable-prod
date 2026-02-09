@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
 import NProgress from "nprogress";
 import { updateExperimentAction } from "@/app/experiments/actions";
@@ -19,12 +20,14 @@ const DEFAULT_PEPTIDES = [
 interface EditablePeptidesProps {
   experimentId: string;
   initialPeptides: string[] | null;
+  peptideIdByName?: Record<string, string>;
   editMode?: boolean;
 }
 
 export function EditablePeptides({
   experimentId,
   initialPeptides,
+  peptideIdByName,
   editMode = false,
 }: EditablePeptidesProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -125,14 +128,27 @@ export function EditablePeptides({
         </div>
       ) : hasPeptides ? (
         <div className="flex flex-wrap gap-2">
-          {selectedPeptides.map((peptide, index) => (
-            <span
-              key={index}
-              className="px-3 py-1 text-sm font-mono bg-zinc-100 dark:bg-zinc-800 rounded"
-            >
-              {peptide}
-            </span>
-          ))}
+          {selectedPeptides.map((peptide, index) => {
+            const peptideId =
+              peptideIdByName?.[peptide] ?? peptideIdByName?.[peptide.toLowerCase()];
+
+            return peptideId ? (
+              <Link
+                key={index}
+                href={`/peptides/${peptideId}`}
+                className="px-3 py-1 text-sm font-mono bg-zinc-100 dark:bg-zinc-800 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              >
+                {peptide}
+              </Link>
+            ) : (
+              <span
+                key={index}
+                className="px-3 py-1 text-sm font-mono bg-zinc-100 dark:bg-zinc-800 rounded"
+              >
+                {peptide}
+              </span>
+            )
+          })}
         </div>
       ) : (
         <p className="text-zinc-500 italic">No peptides</p>

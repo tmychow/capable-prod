@@ -240,6 +240,15 @@ async def get_peptides(user=Depends(get_current_user)):
     return result.data
 
 
+@app.get("/peptides/{peptide_id}")
+async def get_peptide(peptide_id: int, user=Depends(get_current_user)):
+    supabase = get_supabase()
+    result = supabase.table("peptides").select("*").eq("id", peptide_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Peptide not found")
+    return result.data[0]
+
+
 @app.post("/peptides")
 async def create_peptide(
     peptide: PeptideCreate,

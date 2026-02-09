@@ -472,6 +472,7 @@ function PeptideCard({
   query: string;
   onUpdated: () => void;
 }) {
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -532,7 +533,31 @@ function PeptideCard({
   }
 
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, textarea, select")) {
+          return;
+        }
+        NProgress.start();
+        router.push(`/peptides/${peptide.id}`);
+      }}
+      onKeyDown={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, textarea, select")) {
+          return;
+        }
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          NProgress.start();
+          router.push(`/peptides/${peptide.id}`);
+        }
+      }}
+      className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors cursor-pointer"
+      aria-label={`Open peptide ${peptide.name}`}
+    >
       <div className="flex justify-between items-start mb-3">
         <Highlight
           text={peptide.name}
