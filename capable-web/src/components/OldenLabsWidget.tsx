@@ -153,46 +153,6 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
     }
   }
 
-  async function handleResync() {
-    if (!currentStudyId) return;
-
-    setError(null);
-    setSuccess(null);
-    setLoading(true);
-    NProgress.start();
-
-    try {
-      const params = new URLSearchParams({
-        study_id: String(currentStudyId),
-        exclude_experiment_id: experimentId,
-      });
-      const syncRes = await fetch(`/api/oldenlabs/sync?${params}`);
-
-      if (!syncRes.ok) {
-        const data = await syncRes.json();
-        throw new Error(data.error || "Sync failed");
-      }
-
-      const syncData = await syncRes.json();
-
-      await updateExperimentAction(experimentId, {
-        ...(syncData.name && { name: syncData.name }),
-        ...(syncData.description && { description: syncData.description }),
-        ...(syncData.groups?.length > 0 && { groups: syncData.groups }),
-        ...(syncData.experiment_start && { experiment_start: syncData.experiment_start }),
-        ...(syncData.organism_type && { organism_type: syncData.organism_type }),
-      });
-
-      setSuccess("Synced latest data from Olden Labs");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sync failed");
-    } finally {
-      setLoading(false);
-      NProgress.done();
-    }
-  }
-
   async function handleExtract() {
     if (!currentStudyId) {
       setError("No Olden Labs Study ID configured for this experiment");
@@ -395,31 +355,6 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
               <p className="text-sm text-green-600 dark:text-green-400">{success}</p>
             </div>
           )}
-
-          <button
-            onClick={handleResync}
-            disabled={loading}
-            className="w-full px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={loading ? "animate-spin" : ""}
-            >
-              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
-              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-              <path d="M16 16h5v5" />
-            </svg>
-            {loading ? "Syncing..." : "Resync from Olden Labs"}
-          </button>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
