@@ -499,4 +499,10 @@ async def cron_backfill_peptide_sequences(request: Request):
     auth_header = request.headers.get("authorization", "")
     if cron_secret and auth_header != f"Bearer {cron_secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return await run_backfill_peptide_sequences()
+    result = await run_backfill_peptide_sequences()
+    if not bool(result.get("success", False)):
+        raise HTTPException(
+            status_code=500,
+            detail=str(result.get("error") or "Sequence backfill failed"),
+        )
+    return result

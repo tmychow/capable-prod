@@ -67,6 +67,7 @@ def _run_backfill_peptide_sequences_sync(
     updated = 0
     skipped = 0
     failed = 0
+    first_error = ""
     jobs: list[dict[str, object]] = []
 
     for row in rows:
@@ -118,10 +119,14 @@ def _run_backfill_peptide_sequences_sync(
             peptide_id = int(result.get("peptide_id"))
         except Exception:
             failed += 1
+            if not first_error:
+                first_error = "Malformed Modal result payload"
             continue
 
         if str(result.get("status") or "") != "ok":
             failed += 1
+            if not first_error:
+                first_error = str(result.get("error") or "Modal worker failed")
             continue
 
         sequence = str(result.get("sequence") or "").strip()
@@ -140,8 +145,23 @@ def _run_backfill_peptide_sequences_sync(
                 updated += 1
             else:
                 failed += 1
+                if not first_error:
+                    first_error = f"DB update returned no row for peptide {peptide_id}"
         except Exception:
             failed += 1
+            if not first_error:
+                first_error = f"DB update failed for peptide {peptide_id}"
+
+    if failed > 0 and updated == 0 and skipped == 0:
+        return {
+            "success": False,
+            "updated": updated,
+            "skipped": skipped,
+            "failed": failed,
+            "total_considered": len(rows),
+            "total_submitted": len(jobs),
+            "error": first_error or "All peptide sequence jobs failed",
+        }
 
     return {
         "success": True,
@@ -150,6 +170,7 @@ def _run_backfill_peptide_sequences_sync(
         "failed": failed,
         "total_considered": len(rows),
         "total_submitted": len(jobs),
+        "error": first_error or None,
     }
 
 

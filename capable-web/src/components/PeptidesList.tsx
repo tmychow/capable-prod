@@ -132,6 +132,9 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
       if (!res.ok) {
         throw new Error(data.error || "Sequence backfill failed");
       }
+      if (data.success === false) {
+        throw new Error(data.error || "Sequence backfill failed");
+      }
 
       const updated = data.updated ?? 0;
       const skipped = data.skipped ?? 0;

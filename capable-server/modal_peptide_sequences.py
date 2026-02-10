@@ -8,7 +8,7 @@ from pathlib import Path
 
 import modal
 
-APP_NAME = os.getenv("MODAL_APP_NAME", "capable-peptide-sequences")
+APP_NAME = os.getenv("MODAL_SEQUENCE_APP_NAME", "capable-peptide-sequences")
 CODEX_SECRET_NAME = os.getenv("MODAL_CODEX_SECRET", "codex-api-key")
 DATA_LAKE_VOLUME_NAME = os.getenv("DATA_LAKE_VOLUME_NAME", "capable-data-lake")
 
