@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -22,6 +23,7 @@ from api.peptides import (
     run_backfill_experiment_peptides,
     sync_experiment_peptides_for_experiment_ids,
 )
+from api.peptide_sequences import run_backfill_peptide_sequences
 
 app = FastAPI(
     title="Axonic API",
@@ -306,6 +308,9 @@ async def create_peptide(
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create peptide")
 
+    created_row = result.data[0]
+    created_id = created_row.get("id")
+
     try:
         await sync_experiment_peptides_for_experiment_ids(
             sorted({str(exp_id).strip() for exp_id in peptide.experiment_ids if str(exp_id).strip()})
@@ -314,7 +319,16 @@ async def create_peptide(
         # Avoid failing create after DB write; consistency can be repaired by backfill endpoint.
         pass
 
-    return result.data[0]
+    if not str(peptide.sequence or "").strip() and created_id is not None:
+        try:
+            asyncio.create_task(
+                run_backfill_peptide_sequences(peptide_ids=[int(created_id)])
+            )
+        except Exception:
+            # Avoid failing create after DB write; this can be manually backfilled.
+            pass
+
+    return created_row
 
 
 @app.put("/peptides/{peptide_id}")
@@ -476,3 +490,13 @@ async def cron_backfill_experiment_peptides(request: Request):
     if cron_secret and auth_header != f"Bearer {cron_secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
     return await run_backfill_experiment_peptides()
+
+
+@app.post("/cron/backfill-peptide-sequences")
+async def cron_backfill_peptide_sequences(request: Request):
+    # Verify Vercel cron secret
+    cron_secret = os.getenv("CRON_SECRET", "")
+    auth_header = request.headers.get("authorization", "")
+    if cron_secret and auth_header != f"Bearer {cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return await run_backfill_peptide_sequences()

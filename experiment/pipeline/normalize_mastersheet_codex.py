@@ -13,7 +13,7 @@ from pathlib import Path
 import modal
 
 APP_NAME = os.getenv("MODAL_APP_NAME", "capable-mastersheet-codex")
-CODEX_SECRET_NAME = os.getenv("MODAL_CODEX_SECRET", "codex-api-key")
+CODEX_SECRET_NAME = os.getenv("CODEX_API_KEY", "codex-api-key")
 
 DEFAULT_INPUT_CSV = Path(
     os.getenv("MASTERSHEET_CSV", "raw/nps_mastersheet_filtered_enriched.csv")

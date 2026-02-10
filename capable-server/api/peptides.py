@@ -6,6 +6,7 @@ import re
 from openai import AsyncOpenAI
 
 from api.database import get_supabase_admin
+from api.peptide_sequences import run_backfill_peptide_sequences
 
 
 EXTRACTION_PROMPT = """\
@@ -319,13 +320,26 @@ async def run_sync_peptides_cron(limit: int | None = None):
                 "experiments": exp_list,
             })
 
+    created_ids: list[int] = []
     if to_insert:
-        supabase.table("peptides").insert(to_insert).execute()
+        insert_result = supabase.table("peptides").insert(to_insert).execute()
+        for row in insert_result.data or []:
+            try:
+                created_ids.append(int(row["id"]))
+            except Exception:
+                continue
 
     for row in to_update:
         supabase.table("peptides").update(
             {"experiments": row["experiments"]}
         ).eq("id", row["id"]).execute()
+
+    if created_ids:
+        try:
+            await run_backfill_peptide_sequences(peptide_ids=created_ids)
+        except Exception:
+            # Avoid failing peptide sync if sequence backfill fails.
+            pass
 
     # Keep experiments.peptides synchronized for processed experiments.
     backfill_result = await sync_experiment_peptides_for_experiment_ids(
