@@ -12,6 +12,8 @@ import modal
 APP_NAME = os.getenv("MODAL_SEQUENCE_APP_NAME", "capable-peptide-sequences")
 CODEX_SECRET_NAME = os.getenv("MODAL_CODEX_SECRET", "codex-api-key")
 DATA_LAKE_VOLUME_NAME = os.getenv("DATA_LAKE_VOLUME_NAME", "capable-data-lake")
+CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.3-codex")
+CODEX_REASONING_EFFORT = os.getenv("CODEX_REASONING_EFFORT", "high")
 
 DATA_LAKE_VOLUME = modal.Volume.from_name(
     DATA_LAKE_VOLUME_NAME,
@@ -122,7 +124,16 @@ def run_codex_for_peptide(job: dict[str, object]) -> dict[str, object]:
 
     prompt = build_prompt(peptide_name)
     result = subprocess.run(
-        ["codex", "exec", "--yolo", "-"],
+        [
+            "codex",
+            "exec",
+            "--yolo",
+            "-m",
+            CODEX_MODEL,
+            "-c",
+            f"model_reasoning_effort={json.dumps(CODEX_REASONING_EFFORT)}",
+            "-",
+        ],
         cwd=str(workspace),
         capture_output=True,
         text=True,
@@ -177,7 +188,16 @@ def run_codex_for_peptide_notes(job: dict[str, object]) -> dict[str, object]:
             notes_file_path = Path(temp_dir) / "notes.md"
             prompt = build_notes_prompt(peptide_name, str(notes_file_path))
             result = subprocess.run(
-                ["codex", "exec", "--yolo", "-"],
+                [
+                    "codex",
+                    "exec",
+                    "--yolo",
+                    "-m",
+                    CODEX_MODEL,
+                    "-c",
+                    f"model_reasoning_effort={json.dumps(CODEX_REASONING_EFFORT)}",
+                    "-",
+                ],
                 cwd=str(workspace),
                 capture_output=True,
                 text=True,
