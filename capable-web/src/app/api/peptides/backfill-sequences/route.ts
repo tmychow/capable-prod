@@ -13,15 +13,35 @@ export async function POST() {
     method: "POST",
     headers,
   });
+  const raw = await res.text();
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = null;
+  }
 
   if (!res.ok) {
-    const text = await res.text();
     return NextResponse.json(
-      { error: text || "Sequence backfill failed" },
+      {
+        error:
+          (data?.detail as string | undefined) ||
+          (data?.error as string | undefined) ||
+          raw ||
+          "Sequence backfill failed",
+      },
       { status: res.status }
     );
   }
 
-  const data = await res.json();
+  if (!data) {
+    return NextResponse.json(
+      {
+        error: raw || "Invalid non-JSON response from sequence backfill API",
+      },
+      { status: 502 }
+    );
+  }
+
   return NextResponse.json(data);
 }

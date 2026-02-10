@@ -127,21 +127,32 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
       const res = await fetch("/api/peptides/backfill-sequences", {
         method: "POST",
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: Record<string, unknown> = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(raw || "Sequence backfill failed");
+      }
 
       if (!res.ok) {
-        throw new Error(data.error || "Sequence backfill failed");
+        throw new Error(
+          (data.error as string | undefined) || "Sequence backfill failed"
+        );
       }
       if (data.success === false) {
-        throw new Error(data.error || "Sequence backfill failed");
+        throw new Error(
+          (data.error as string | undefined) || "Sequence backfill failed"
+        );
       }
 
-      const updated = data.updated ?? 0;
-      const skipped = data.skipped ?? 0;
-      const failed = data.failed ?? 0;
-      setSyncResult(
-        `Backfilled sequences: updated ${updated}, skipped ${skipped}, failed ${failed}`
-      );
+      const started = Boolean(data.started);
+      const message =
+        (data.message as string | undefined) ||
+        (started
+          ? "Sequence backfill started"
+          : "Sequence backfill already running");
+      setSyncResult(message);
       router.refresh();
     } catch (err) {
       setError(

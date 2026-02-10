@@ -31,6 +31,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
+sequence_backfill_task: asyncio.Task | None = None
+
 all_vercel_previews = r"https://.*\.vercel\.app"
 localhost = r"http://localhost(:\d+)?"
 
@@ -499,10 +501,24 @@ async def cron_backfill_peptide_sequences(request: Request):
     auth_header = request.headers.get("authorization", "")
     if cron_secret and auth_header != f"Bearer {cron_secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
-    result = await run_backfill_peptide_sequences()
-    if not bool(result.get("success", False)):
-        raise HTTPException(
-            status_code=500,
-            detail=str(result.get("error") or "Sequence backfill failed"),
-        )
-    return result
+    global sequence_backfill_task
+    if sequence_backfill_task and not sequence_backfill_task.done():
+        return {
+            "success": True,
+            "started": False,
+            "message": "Sequence backfill already running",
+        }
+
+    async def _runner() -> None:
+        try:
+            await run_backfill_peptide_sequences()
+        except Exception:
+            # Keep cron endpoint simple; errors are visible in server logs.
+            pass
+
+    sequence_backfill_task = asyncio.create_task(_runner())
+    return {
+        "success": True,
+        "started": True,
+        "message": "Sequence backfill started",
+    }

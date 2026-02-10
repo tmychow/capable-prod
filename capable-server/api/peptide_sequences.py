@@ -102,7 +102,6 @@ def _run_backfill_peptide_sequences_sync(
             MODAL_SEQUENCE_APP_NAME,
             MODAL_SEQUENCE_FUNCTION_NAME,
         )
-        results = list(fn.map(jobs))
     except Exception as exc:
         return {
             "success": False,
@@ -114,7 +113,15 @@ def _run_backfill_peptide_sequences_sync(
             "error": str(exc),
         }
 
-    for result in results:
+    for job in jobs:
+        try:
+            result = fn.remote(job)
+        except Exception as exc:
+            failed += 1
+            if not first_error:
+                first_error = str(exc)
+            continue
+
         try:
             peptide_id = int(result.get("peptide_id"))
         except Exception:
