@@ -1,0 +1,7 @@
+# MMP names in the order the model outputs them
+# (pivot table re-ordered columns alphabetically during train/test split creation)
+mmps = [
+    'MMP1', 'MMP10', 'MMP11', 'MMP12', 'MMP13', 'MMP14', 'MMP15', 'MMP16',
+    'MMP17', 'MMP19', 'MMP2', 'MMP20', 'MMP24', 'MMP25', 'MMP3', 'MMP7',
+    'MMP8', 'MMP9',
+]
