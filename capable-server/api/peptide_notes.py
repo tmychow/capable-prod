@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import os
 
 import modal
@@ -20,6 +21,27 @@ NOTES_BACKFILL_MAX_PARALLEL = max(
     1,
     int(os.getenv("NOTES_BACKFILL_MAX_PARALLEL", "25")),
 )
+PEPTIDE_LOG_MAX_CHARS = max(
+    1000,
+    int(os.getenv("PEPTIDE_LOG_MAX_CHARS", "25000")),
+)
+
+
+def _trim_text(value: object) -> str:
+    text = str(value or "").strip()
+    if len(text) <= PEPTIDE_LOG_MAX_CHARS:
+        return text
+    return text[:PEPTIDE_LOG_MAX_CHARS] + " ...[truncated]"
+
+
+def _notes_log_payload(result: dict[str, object]) -> str:
+    payload = {
+        "source": "notes_backfill",
+        "status": str(result.get("status") or ""),
+        "error": _trim_text(result.get("error")),
+        "raw_output": _trim_text(result.get("raw_output")),
+    }
+    return json.dumps(payload, ensure_ascii=True)
 
 
 def _normalize_target_ids(peptide_ids: list[int] | None) -> list[int] | None:
@@ -128,22 +150,39 @@ def _run_backfill_peptide_notes_sync(
                 first_error = "Malformed Modal result payload"
             return
 
+        logs_text = _notes_log_payload(result)
+
+        def write_logs_only() -> None:
+            nonlocal first_error
+            try:
+                (
+                    supabase.table("peptides")
+                    .update({"logs": logs_text})
+                    .eq("id", peptide_id)
+                    .execute()
+                )
+            except Exception:
+                if not first_error:
+                    first_error = f"Log write failed for peptide {peptide_id}"
+
         if str(result.get("status") or "") != "ok":
             failed += 1
             error_text = str(result.get("error") or "Modal worker failed")
             if not first_error:
                 first_error = error_text
+            write_logs_only()
             return
 
         notes = str(result.get("notes") or "").strip()
         if not notes:
             skipped += 1
+            write_logs_only()
             return
 
         try:
             write_result = (
                 supabase.table("peptides")
-                .update({"notes": notes})
+                .update({"notes": notes, "logs": logs_text})
                 .eq("id", peptide_id)
                 .execute()
             )
@@ -173,8 +212,30 @@ def _run_backfill_peptide_notes_sync(
                 result = future.result()
             except Exception as exc:
                 failed += 1
+                peptide_id = job.get("peptide_id")
+                if peptide_id is not None:
+                    try:
+                        (
+                            supabase.table("peptides")
+                            .update(
+                                {
+                                    "logs": json.dumps(
+                                        {
+                                            "source": "notes_backfill",
+                                            "status": "failed",
+                                            "error": _trim_text(str(exc)),
+                                            "raw_output": "",
+                                        },
+                                        ensure_ascii=True,
+                                    )
+                                }
+                            )
+                            .eq("id", int(peptide_id))
+                            .execute()
+                        )
+                    except Exception:
+                        pass
                 if not first_error:
-                    peptide_id = job.get("peptide_id")
                     first_error = (
                         f"Modal call failed for peptide {peptide_id}: {exc}"
                     )

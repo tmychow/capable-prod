@@ -70,7 +70,8 @@ Inference rules:
 - For truncation names like NPS(1-10), derive from base sequence and slice the indicated range.
 
 Output:
-Return exactly one XML tag and nothing else:
+First, write a short explanation (2-6 lines) OUTSIDE XML describing what evidence drove your answer, or if no evidence is found, why not.
+Then end with exactly one XML tag:
 <sequence>...</sequence>
 If unknown:
 <sequence></sequence>
@@ -85,6 +86,16 @@ def parse_sequence_tag(text: str) -> str:
     return re.sub(r"\s+", "", sequence)
 
 
+def extract_sequence_explanation(text: str) -> str:
+    explanation = re.sub(
+        r"<sequence>.*?</sequence>",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return explanation.strip()
+
+
 def build_notes_prompt(peptide_name: str, notes_path: str) -> str:
     return f"""You are in /repo and can read /repo/datalake. Please look through the folder and find all the information relating to {peptide_name}.
     
@@ -92,7 +103,9 @@ Do not include information that is about variants or related molecules. Look at 
 
 Add all the information you find to a markdown file at this exact path: {notes_path}. Do not include information about the source, just the actual information.
 
-If no useful information is found, write an empty file. Do not print the markdown to stdout. Write it only to the file path above.
+After writing the file, print a short explanation (2-6 lines) of what information you included.
+If no useful information is found, write an empty file and print an explanation of why no information was found.
+Do not print the markdown itself to stdout. Write markdown only to the file path above.
 """
 
 
@@ -133,21 +146,25 @@ def run_codex_for_peptide(job: dict[str, object]) -> dict[str, object]:
         input=prompt,
         check=False,
     )
+    raw_output = (result.stdout or "").strip()
+    explanation = extract_sequence_explanation(raw_output)
     if result.returncode != 0:
         return {
             "peptide_id": peptide_id,
             "sequence": "",
             "status": "failed",
             "error": (result.stderr or "codex exec failed").strip(),
+            "raw_output": raw_output,
+            "decision_notes": explanation,
         }
 
-    raw_output = (result.stdout or "").strip()
     sequence = parse_sequence_tag(raw_output)
     return {
         "peptide_id": peptide_id,
         "sequence": sequence,
         "status": "ok",
         "raw_output": raw_output,
+        "decision_notes": explanation,
     }
 
 
@@ -203,6 +220,7 @@ def run_codex_for_peptide_notes(job: dict[str, object]) -> dict[str, object]:
                     "notes": "",
                     "status": "failed",
                     "error": (result.stderr or "codex exec failed").strip(),
+                    "raw_output": (result.stdout or "").strip(),
                 }
 
             raw_output = (result.stdout or "").strip()
