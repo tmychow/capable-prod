@@ -12,7 +12,7 @@ import modal
 APP_NAME = os.getenv("MODAL_SEQUENCE_APP_NAME", "capable-peptide-sequences")
 CODEX_SECRET_NAME = os.getenv("MODAL_CODEX_SECRET", "codex-api-key")
 DATA_LAKE_VOLUME_NAME = os.getenv("DATA_LAKE_VOLUME_NAME", "capable-data-lake")
-CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.3-codex")
+CODEX_MODEL = os.getenv("CODEX_MODEL", "gpt-5.2-codex")
 CODEX_REASONING_EFFORT = os.getenv("CODEX_REASONING_EFFORT", "high")
 
 DATA_LAKE_VOLUME = modal.Volume.from_name(
