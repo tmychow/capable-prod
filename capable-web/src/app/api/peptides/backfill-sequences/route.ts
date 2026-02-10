@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const CRON_SECRET = process.env.CRON_SECRET || "";
+export const maxDuration = 800;
 
 export async function POST() {
   const headers: HeadersInit = {};
