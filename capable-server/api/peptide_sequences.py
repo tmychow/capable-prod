@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import os
 
 import modal
@@ -14,6 +15,10 @@ MODAL_SEQUENCE_APP_NAME = os.getenv(
 MODAL_SEQUENCE_FUNCTION_NAME = os.getenv(
     "MODAL_SEQUENCE_FUNCTION_NAME",
     "run_codex_for_peptide",
+)
+SEQUENCE_BACKFILL_MAX_PARALLEL = max(
+    1,
+    int(os.getenv("SEQUENCE_BACKFILL_MAX_PARALLEL", "25")),
 )
 
 
@@ -113,14 +118,8 @@ def _run_backfill_peptide_sequences_sync(
             "error": str(exc),
         }
 
-    for job in jobs:
-        try:
-            result = fn.remote(job)
-        except Exception as exc:
-            failed += 1
-            if not first_error:
-                first_error = str(exc)
-            continue
+    def process_one_result(result: dict[str, object]) -> None:
+        nonlocal updated, skipped, failed, first_error
 
         try:
             peptide_id = int(result.get("peptide_id"))
@@ -128,18 +127,18 @@ def _run_backfill_peptide_sequences_sync(
             failed += 1
             if not first_error:
                 first_error = "Malformed Modal result payload"
-            continue
+            return
 
         if str(result.get("status") or "") != "ok":
             failed += 1
             if not first_error:
                 first_error = str(result.get("error") or "Modal worker failed")
-            continue
+            return
 
         sequence = str(result.get("sequence") or "").strip()
         if not sequence:
             skipped += 1
-            continue
+            return
 
         try:
             write_result = (
@@ -158,6 +157,27 @@ def _run_backfill_peptide_sequences_sync(
             failed += 1
             if not first_error:
                 first_error = f"DB update failed for peptide {peptide_id}"
+
+    max_workers = min(SEQUENCE_BACKFILL_MAX_PARALLEL, len(jobs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_job = {
+            executor.submit(fn.remote, job): job
+            for job in jobs
+        }
+
+        for future in concurrent.futures.as_completed(future_to_job):
+            job = future_to_job[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                failed += 1
+                if not first_error:
+                    peptide_id = job.get("peptide_id")
+                    first_error = (
+                        f"Modal call failed for peptide {peptide_id}: {exc}"
+                    )
+                continue
+            process_one_result(result)
 
     if failed > 0 and updated == 0 and skipped == 0:
         return {
