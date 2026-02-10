@@ -46,6 +46,7 @@ export interface Peptide {
   created_at: string;
   name: string;
   sequence: string;
+  notes?: string | null;
   experiments: Record<string, string>[];
 }
 

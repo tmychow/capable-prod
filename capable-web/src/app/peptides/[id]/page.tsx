@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Markdown } from "@/components/Markdown";
 import { AuthError, formatDateTime, getPeptide } from "@/lib/api";
 import { getServerSession } from "@/lib/session";
 
@@ -50,6 +51,7 @@ export default async function PeptideDetailPage({
   const experiments = (peptide.experiments || []).flatMap((entry) =>
     Object.entries(entry)
   );
+  const notes = typeof peptide.notes === "string" ? peptide.notes.trim() : "";
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -99,6 +101,15 @@ export default async function PeptideDetailPage({
             </div>
           ) : (
             <p className="text-sm text-zinc-500 italic">No linked experiments</p>
+          )}
+        </section>
+
+        <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-4">Notes</h2>
+          {notes ? (
+            <Markdown>{notes}</Markdown>
+          ) : (
+            <p className="text-sm text-zinc-500 italic">No notes</p>
           )}
         </section>
       </div>

@@ -332,15 +332,6 @@ async def create_peptide(
             # Avoid failing create after DB write; this can be manually backfilled.
             pass
 
-    if not str(created_row.get("notes") or "").strip() and created_id is not None:
-        try:
-            asyncio.create_task(
-                run_backfill_peptide_notes(peptide_ids=[int(created_id)])
-            )
-        except Exception:
-            # Avoid failing create after DB write; this can be manually backfilled.
-            pass
-
     return created_row
 
 

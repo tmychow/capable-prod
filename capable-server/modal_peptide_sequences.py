@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import modal
@@ -82,16 +83,14 @@ def parse_sequence_tag(text: str) -> str:
     return re.sub(r"\s+", "", sequence)
 
 
-def build_notes_prompt(peptide_name: str) -> str:
+def build_notes_prompt(peptide_name: str, notes_path: str) -> str:
     return f"""You are in /repo and can read /repo/datalake. Please look through the folder and find all the information relating to {peptide_name}.
     
 Do not include information that is about variants or related molecules. Look at the peptides notion and the breakdown studies folder.
 
-Output:
-Return exactly one XML tag and nothing else:
-<notes>...</notes>
-If no useful information is found:
-<notes></notes>
+Add all the information you find to a markdown file at this exact path: {notes_path}
+
+If no useful information is found, write an empty file. Do not print the markdown to stdout. Write it only to the file path above.
 """
 
 
@@ -167,25 +166,43 @@ def run_codex_for_peptide_notes(job: dict[str, object]) -> dict[str, object]:
             "error": "Missing peptide name",
         }
 
-    prompt = build_notes_prompt(peptide_name)
-    result = subprocess.run(
-        ["codex", "exec", "--yolo", "-"],
-        cwd=str(workspace),
-        capture_output=True,
-        text=True,
-        input=prompt,
-        check=False,
-    )
-    if result.returncode != 0:
+    notes = ""
+    raw_output = ""
+
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix=f"peptide_notes_{peptide_id}_",
+            dir="/tmp",
+        ) as temp_dir:
+            notes_file_path = Path(temp_dir) / "notes.md"
+            prompt = build_notes_prompt(peptide_name, str(notes_file_path))
+            result = subprocess.run(
+                ["codex", "exec", "--yolo", "-"],
+                cwd=str(workspace),
+                capture_output=True,
+                text=True,
+                input=prompt,
+                check=False,
+            )
+            if result.returncode != 0:
+                return {
+                    "peptide_id": peptide_id,
+                    "notes": "",
+                    "status": "failed",
+                    "error": (result.stderr or "codex exec failed").strip(),
+                }
+
+            raw_output = (result.stdout or "").strip()
+            if notes_file_path.exists():
+                notes = notes_file_path.read_text(encoding="utf-8").strip()
+    except Exception as exc:
         return {
             "peptide_id": peptide_id,
             "notes": "",
             "status": "failed",
-            "error": (result.stderr or "codex exec failed").strip(),
+            "error": f"Notes temp file handling failed: {exc}",
         }
 
-    raw_output = (result.stdout or "").strip()
-    notes = parse_notes_tag(raw_output)
     return {
         "peptide_id": peptide_id,
         "notes": notes,
