@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 
 from api.database import get_supabase_admin
 from api.peptide_sequences import run_backfill_peptide_sequences
+from api.peptide_notes import run_backfill_peptide_notes
 
 
 EXTRACTION_PROMPT = """\
@@ -339,6 +340,11 @@ async def run_sync_peptides_cron(limit: int | None = None):
             await run_backfill_peptide_sequences(peptide_ids=created_ids)
         except Exception:
             # Avoid failing peptide sync if sequence backfill fails.
+            pass
+        try:
+            await run_backfill_peptide_notes(peptide_ids=created_ids)
+        except Exception:
+            # Avoid failing peptide sync if notes backfill fails.
             pass
 
     # Keep experiments.peptides synchronized for processed experiments.

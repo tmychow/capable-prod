@@ -24,6 +24,7 @@ from api.peptides import (
     sync_experiment_peptides_for_experiment_ids,
 )
 from api.peptide_sequences import run_backfill_peptide_sequences
+from api.peptide_notes import run_backfill_peptide_notes
 
 app = FastAPI(
     title="Axonic API",
@@ -32,6 +33,7 @@ app = FastAPI(
 )
 
 sequence_backfill_task: asyncio.Task | None = None
+notes_backfill_task: asyncio.Task | None = None
 
 all_vercel_previews = r"https://.*\.vercel\.app"
 localhost = r"http://localhost(:\d+)?"
@@ -330,6 +332,15 @@ async def create_peptide(
             # Avoid failing create after DB write; this can be manually backfilled.
             pass
 
+    if not str(created_row.get("notes") or "").strip() and created_id is not None:
+        try:
+            asyncio.create_task(
+                run_backfill_peptide_notes(peptide_ids=[int(created_id)])
+            )
+        except Exception:
+            # Avoid failing create after DB write; this can be manually backfilled.
+            pass
+
     return created_row
 
 
@@ -521,4 +532,35 @@ async def cron_backfill_peptide_sequences(request: Request):
         "success": True,
         "started": True,
         "message": "Sequence backfill started",
+    }
+
+
+@app.post("/cron/backfill-peptide-notes")
+async def cron_backfill_peptide_notes(request: Request):
+    # Verify Vercel cron secret
+    cron_secret = os.getenv("CRON_SECRET", "")
+    auth_header = request.headers.get("authorization", "")
+    if cron_secret and auth_header != f"Bearer {cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    global notes_backfill_task
+    if notes_backfill_task and not notes_backfill_task.done():
+        return {
+            "success": True,
+            "started": False,
+            "message": "Notes backfill already running",
+        }
+
+    async def _runner() -> None:
+        try:
+            await run_backfill_peptide_notes()
+        except Exception:
+            # Keep cron endpoint simple; errors are visible in server logs.
+            pass
+
+    notes_backfill_task = asyncio.create_task(_runner())
+    return {
+        "success": True,
+        "started": True,
+        "message": "Notes backfill started",
     }

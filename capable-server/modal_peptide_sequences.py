@@ -82,6 +82,26 @@ def parse_sequence_tag(text: str) -> str:
     return re.sub(r"\s+", "", sequence)
 
 
+def build_notes_prompt(peptide_name: str) -> str:
+    return f"""You are in /repo and can read /repo/datalake. Please look through the folder and find all the information relating to {peptide_name}.
+    
+Do not include information that is about variants or related molecules. Look at the peptides notion and the breakdown studies folder.
+
+Output:
+Return exactly one XML tag and nothing else:
+<notes>...</notes>
+If no useful information is found:
+<notes></notes>
+"""
+
+
+def parse_notes_tag(text: str) -> str:
+    match = re.search(r"<notes>(.*?)</notes>", text, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
 @app.function(
     image=image,
     secrets=[modal.Secret.from_name(CODEX_SECRET_NAME)],
@@ -123,6 +143,52 @@ def run_codex_for_peptide(job: dict[str, object]) -> dict[str, object]:
     return {
         "peptide_id": peptide_id,
         "sequence": sequence,
+        "status": "ok",
+        "raw_output": raw_output,
+    }
+
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name(CODEX_SECRET_NAME)],
+    volumes={"/repo/datalake": DATA_LAKE_VOLUME.read_only()},
+)
+def run_codex_for_peptide_notes(job: dict[str, object]) -> dict[str, object]:
+    peptide_id = int(job["peptide_id"])
+    peptide_name = str(job["name"] or "").strip()
+    workspace = Path("/repo")
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    if not peptide_name:
+        return {
+            "peptide_id": peptide_id,
+            "notes": "",
+            "status": "failed",
+            "error": "Missing peptide name",
+        }
+
+    prompt = build_notes_prompt(peptide_name)
+    result = subprocess.run(
+        ["codex", "exec", "--yolo", "-"],
+        cwd=str(workspace),
+        capture_output=True,
+        text=True,
+        input=prompt,
+        check=False,
+    )
+    if result.returncode != 0:
+        return {
+            "peptide_id": peptide_id,
+            "notes": "",
+            "status": "failed",
+            "error": (result.stderr or "codex exec failed").strip(),
+        }
+
+    raw_output = (result.stdout or "").strip()
+    notes = parse_notes_tag(raw_output)
+    return {
+        "peptide_id": peptide_id,
+        "notes": notes,
         "status": "ok",
         "raw_output": raw_output,
     }

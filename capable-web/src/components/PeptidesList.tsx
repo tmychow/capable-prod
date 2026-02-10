@@ -20,6 +20,7 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [sequenceBackfilling, setSequenceBackfilling] = useState(false);
+  const [notesBackfilling, setNotesBackfilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -164,6 +165,53 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
     }
   }
 
+  async function handleNotesBackfill() {
+    setNotesBackfilling(true);
+    setError(null);
+    setSyncResult(null);
+    NProgress.start();
+
+    try {
+      const res = await fetch("/api/peptides/backfill-notes", {
+        method: "POST",
+      });
+      const raw = await res.text();
+      let data: Record<string, unknown> = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(raw || "Notes backfill failed");
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          (data.error as string | undefined) || "Notes backfill failed"
+        );
+      }
+      if (data.success === false) {
+        throw new Error(
+          (data.error as string | undefined) || "Notes backfill failed"
+        );
+      }
+
+      const started = Boolean(data.started);
+      const message =
+        (data.message as string | undefined) ||
+        (started
+          ? "Notes backfill started"
+          : "Notes backfill already running");
+      setSyncResult(message);
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Notes backfill failed"
+      );
+    } finally {
+      setNotesBackfilling(false);
+      NProgress.done();
+    }
+  }
+
   const syncIcon = (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -192,7 +240,7 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
           <button
             type="button"
             onClick={() => handleSync(false)}
-            disabled={syncing || backfilling || sequenceBackfilling}
+            disabled={syncing || backfilling || sequenceBackfilling || notesBackfilling}
             className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {syncIcon}
@@ -202,7 +250,7 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
           <button
             type="button"
             onClick={() => handleSync(true)}
-            disabled={syncing || backfilling || sequenceBackfilling}
+            disabled={syncing || backfilling || sequenceBackfilling || notesBackfilling}
             className="px-3 py-2 rounded-lg text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
           >
             {syncing ? "Syncing..." : "Sync All"}
@@ -211,7 +259,7 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
           <button
             type="button"
             onClick={handleBackfill}
-            disabled={syncing || backfilling || sequenceBackfilling}
+            disabled={syncing || backfilling || sequenceBackfilling || notesBackfilling}
             className="px-3 py-2 rounded-lg text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
           >
             {backfilling ? "Backfilling..." : "Backfill Experiments"}
@@ -220,10 +268,19 @@ export function PeptidesList({ peptides }: PeptidesListProps) {
           <button
             type="button"
             onClick={handleSequenceBackfill}
-            disabled={syncing || backfilling || sequenceBackfilling}
+            disabled={syncing || backfilling || sequenceBackfilling || notesBackfilling}
             className="px-3 py-2 rounded-lg text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
           >
             {sequenceBackfilling ? "Backfilling..." : "Backfill Sequences"}
+          </button>
+          <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-700" />
+          <button
+            type="button"
+            onClick={handleNotesBackfill}
+            disabled={syncing || backfilling || sequenceBackfilling || notesBackfilling}
+            className="px-3 py-2 rounded-lg text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+          >
+            {notesBackfilling ? "Backfilling..." : "Backfill Notes"}
           </button>
           <span className="w-px h-6 bg-zinc-200 dark:bg-zinc-700" />
           <button

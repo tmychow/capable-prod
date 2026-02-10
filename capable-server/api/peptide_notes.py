@@ -8,17 +8,17 @@ import modal
 
 from api.database import get_supabase
 
-MODAL_SEQUENCE_APP_NAME = os.getenv(
-    "MODAL_SEQUENCE_APP_NAME",
-    "capable-peptide-sequences",
+MODAL_NOTES_APP_NAME = os.getenv(
+    "MODAL_NOTES_APP_NAME",
+    os.getenv("MODAL_SEQUENCE_APP_NAME", "capable-peptide-sequences"),
 )
-MODAL_SEQUENCE_FUNCTION_NAME = os.getenv(
-    "MODAL_SEQUENCE_FUNCTION_NAME",
-    "run_codex_for_peptide",
+MODAL_NOTES_FUNCTION_NAME = os.getenv(
+    "MODAL_NOTES_FUNCTION_NAME",
+    "run_codex_for_peptide_notes",
 )
-SEQUENCE_BACKFILL_MAX_PARALLEL = max(
+NOTES_BACKFILL_MAX_PARALLEL = max(
     1,
-    int(os.getenv("SEQUENCE_BACKFILL_MAX_PARALLEL", "25")),
+    int(os.getenv("NOTES_BACKFILL_MAX_PARALLEL", "25")),
 )
 
 
@@ -33,17 +33,16 @@ def _normalize_target_ids(peptide_ids: list[int] | None) -> list[int] | None:
             continue
         if value > 0:
             normalized_set.add(value)
-    normalized = sorted(normalized_set)
-    return normalized
+    return sorted(normalized_set)
 
 
-def _run_backfill_peptide_sequences_sync(
+def _run_backfill_peptide_notes_sync(
     peptide_ids: list[int] | None = None,
 ) -> dict[str, int | bool | str]:
     supabase = get_supabase()
     target_ids = _normalize_target_ids(peptide_ids)
 
-    query = supabase.table("peptides").select("id, name, sequence")
+    query = supabase.table("peptides").select("id, name, notes")
     if target_ids is not None:
         if not target_ids:
             return {
@@ -83,7 +82,7 @@ def _run_backfill_peptide_sequences_sync(
             continue
         peptide_id = int(peptide_id_raw)
 
-        if str(row.get("sequence") or "").strip():
+        if str(row.get("notes") or "").strip():
             skipped += 1
             continue
         if not peptide_name:
@@ -104,8 +103,8 @@ def _run_backfill_peptide_sequences_sync(
 
     try:
         fn = modal.Function.from_name(
-            MODAL_SEQUENCE_APP_NAME,
-            MODAL_SEQUENCE_FUNCTION_NAME,
+            MODAL_NOTES_APP_NAME,
+            MODAL_NOTES_FUNCTION_NAME,
         )
     except Exception as exc:
         return {
@@ -136,15 +135,15 @@ def _run_backfill_peptide_sequences_sync(
                 first_error = error_text
             return
 
-        sequence = str(result.get("sequence") or "").strip()
-        if not sequence:
+        notes = str(result.get("notes") or "").strip()
+        if not notes:
             skipped += 1
             return
 
         try:
             write_result = (
                 supabase.table("peptides")
-                .update({"sequence": sequence})
+                .update({"notes": notes})
                 .eq("id", peptide_id)
                 .execute()
             )
@@ -161,7 +160,7 @@ def _run_backfill_peptide_sequences_sync(
             if not first_error:
                 first_error = message
 
-    max_workers = min(SEQUENCE_BACKFILL_MAX_PARALLEL, len(jobs))
+    max_workers = min(NOTES_BACKFILL_MAX_PARALLEL, len(jobs))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_job = {
             executor.submit(fn.remote, job): job
@@ -190,7 +189,7 @@ def _run_backfill_peptide_sequences_sync(
             "failed": failed,
             "total_considered": len(rows),
             "total_submitted": len(jobs),
-            "error": first_error or "All peptide sequence jobs failed",
+            "error": first_error or "All peptide notes jobs failed",
         }
 
     return {
@@ -204,10 +203,10 @@ def _run_backfill_peptide_sequences_sync(
     }
 
 
-async def run_backfill_peptide_sequences(
+async def run_backfill_peptide_notes(
     peptide_ids: list[int] | None = None,
 ) -> dict[str, int | bool | str]:
     return await asyncio.to_thread(
-        _run_backfill_peptide_sequences_sync,
+        _run_backfill_peptide_notes_sync,
         peptide_ids,
     )
