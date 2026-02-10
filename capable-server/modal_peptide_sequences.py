@@ -90,17 +90,10 @@ def build_notes_prompt(peptide_name: str, notes_path: str) -> str:
     
 Do not include information that is about variants or related molecules. Look at the peptides notion and the breakdown studies folder.
 
-Add all the information you find to a markdown file at this exact path: {notes_path}
+Add all the information you find to a markdown file at this exact path: {notes_path}. Do not include information about the source, just the actual information.
 
 If no useful information is found, write an empty file. Do not print the markdown to stdout. Write it only to the file path above.
 """
-
-
-def parse_notes_tag(text: str) -> str:
-    match = re.search(r"<notes>(.*?)</notes>", text, flags=re.DOTALL | re.IGNORECASE)
-    if not match:
-        return ""
-    return match.group(1).strip()
 
 
 @app.function(
