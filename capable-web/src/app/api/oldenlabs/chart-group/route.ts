@@ -38,15 +38,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const isBarChart = chartType === "BarChart";
+  const endpoint = isBarChart ? "get-all-chart-data-study" : "get-all-chart-data-group";
+  const filterBy = isBarChart ? "study" : "group";
+
   const url =
-    `${OLDEN_LABS_BASE_URL}/chart/get-all-chart-data-group/` +
+    `${OLDEN_LABS_BASE_URL}/chart/${endpoint}/` +
     `?chart_id=1` +
     `&start_time=${ensureSeconds(startTime)}` +
     `&end_time=${ensureSeconds(endTime)}` +
     `&filter_value=${studyId}` +
-    `&filter_by=group` +
+    `&filter_by=${filterBy}` +
     `&group_by=${groupBy}` +
-    `&group_id=${groupId}` +
+    `&group_id=${isBarChart ? studyId : groupId}` +
     `&study_id=${studyId}` +
     `&chart_type=${chartType}` +
     `&error_bar_type=${errorBarType}`;

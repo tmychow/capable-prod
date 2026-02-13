@@ -43,8 +43,9 @@ export function EditableDetails({
     try {
       await updateExperimentAction(experimentId, {
         organism_type: organismType || null,
-        experiment_start: experimentStart || null,
-        experiment_end: experimentEnd || null,
+        // datetime-local values are local time; convert to UTC ISO for the backend
+        experiment_start: experimentStart ? new Date(experimentStart).toISOString() : null,
+        experiment_end: experimentEnd ? new Date(experimentEnd).toISOString() : null,
       });
       setIsEditing(false);
     } catch (error) {

@@ -1,20 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   ResponsiveContainer,
+  ErrorBar,
+  Cell,
 } from "recharts";
 
 interface OldenLabsChartProps {
   studyId: number;
   groupIds?: string[];
+  onCageCloseDetected?: (timestamp: string) => void;
 }
 
 const BIN_OPTIONS = [
@@ -30,20 +35,19 @@ const COLORS = [
   "#4bb8c4", "#d4658a", "#8fbf5a", "#c47ad4", "#d4885a",
 ];
 
-interface OldenLabsDataset {
-  label: string;
-  data: (number | null)[];
-}
-
-interface OldenLabsChartData {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface OldenLabsChartData {
   chart_number: number;
   name: string;
   typeName: string;
   labels: string[];
-  datasets: OldenLabsDataset[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  datasets: any[];
   yAxis: string;
   description: string;
-  subtitle: string;
+  subtitle: string | null;
+  time_period_for_bar_chart?: string;
+  scatter_data?: { x: string; y: number; info: string }[];
 }
 
 interface ChartDataPoint {
@@ -51,13 +55,21 @@ interface ChartDataPoint {
   [key: string]: string | number | null;
 }
 
-function transformChart(chart: OldenLabsChartData): { data: ChartDataPoint[]; seriesKeys: string[] } {
-  const seriesKeys = chart.datasets.map((ds) => ds.label);
+interface BarChartDataPoint {
+  name: string;
+  value: number;
+  errorLow: number;
+  errorHigh: number;
+}
+
+function transformLineChart(chart: OldenLabsChartData): { data: ChartDataPoint[]; seriesKeys: string[] } {
+  const seriesKeys = chart.datasets.map((ds: { label: string }) => ds.label);
 
   const data: ChartDataPoint[] = chart.labels.map((time, i) => {
     const point: ChartDataPoint = { time };
     for (const ds of chart.datasets) {
-      point[ds.label] = ds.data[i] ?? null;
+      const arr = ds.data as (number | null)[];
+      point[ds.label] = arr[i] ?? null;
     }
     return point;
   });
@@ -65,9 +77,33 @@ function transformChart(chart: OldenLabsChartData): { data: ChartDataPoint[]; se
   return { data, seriesKeys };
 }
 
+function transformBarChart(chart: OldenLabsChartData): { data: BarChartDataPoint[] } {
+  const data: BarChartDataPoint[] = chart.datasets.map((ds) => {
+    const value = typeof ds.data === "number" ? ds.data : 0;
+    const yMin = typeof ds.yMin === "number" ? ds.yMin : value;
+    const yMax = typeof ds.yMax === "number" ? ds.yMax : value;
+    return {
+      name: ds.label,
+      value,
+      errorLow: value - yMin,
+      errorHigh: yMax - value,
+    };
+  });
+  return { data };
+}
+
 function formatTime(time: string): string {
   try {
-    const d = new Date(time);
+    // Handle numeric timestamps (epoch seconds or milliseconds)
+    let d: Date;
+    const num = Number(time);
+    if (!isNaN(num) && time.trim() !== "") {
+      // If it looks like seconds (< 1e12), convert to ms
+      d = new Date(num < 1e12 ? num * 1000 : num);
+    } else {
+      d = new Date(time);
+    }
+    if (isNaN(d.getTime())) return time;
     return d.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
@@ -179,6 +215,42 @@ function formatPValue(p: number): string {
 
 const INITIAL_VISIBLE = 5;
 
+/**
+ * Find the cage close time in "Cage in rack" data.
+ * Pattern: starts closed (1) → opened (0) → closed again (1).
+ * The start time is when it returns to closed (1) after being opened for the first time.
+ */
+export function findCageCloseTime(charts: OldenLabsChartData[]): string | null {
+  const cageChart = charts.find((c) => c.name.toLowerCase().includes("cage in rack"));
+  if (!cageChart) return null;
+
+  let earliestIndex = Infinity;
+  for (const ds of cageChart.datasets) {
+    const data = ds.data as (number | null)[];
+    if (!Array.isArray(data)) continue;
+
+    // Phase 1: skip leading nulls, find initial closed state (1)
+    let i = 0;
+    while (i < data.length && data[i] !== 1) i++;
+    if (i >= data.length) continue;
+
+    // Phase 2: find when it opens (transitions to 0)
+    while (i < data.length && data[i] !== 0) i++;
+    if (i >= data.length) continue;
+
+    // Phase 3: find when it closes again (transitions back to 1)
+    while (i < data.length && data[i] !== 1) i++;
+    if (i >= data.length) continue;
+
+    if (i < earliestIndex) earliestIndex = i;
+  }
+
+  if (earliestIndex < Infinity && earliestIndex < cageChart.labels.length) {
+    return cageChart.labels[earliestIndex];
+  }
+  return null;
+}
+
 // Sort so "Cage in rack" goes to the bottom
 function sortCharts(charts: OldenLabsChartData[]): OldenLabsChartData[] {
   return [...charts].sort((a, b) => {
@@ -188,22 +260,26 @@ function sortCharts(charts: OldenLabsChartData[]): OldenLabsChartData[] {
   });
 }
 
-export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) {
+export function OldenLabsChart({ studyId, groupIds = [], onCageCloseDetected }: OldenLabsChartProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [charts, setCharts] = useState<OldenLabsChartData[] | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
-  // Map from chart_number -> ANOVA result
   const [anovaResults, setAnovaResults] = useState<Record<number, { pValue: number; fStat: number } | null>>({});
   const [anovaLoading, setAnovaLoading] = useState(false);
 
-  const now = new Date();
-  const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
-  const [startTime, setStartTime] = useState(twoDaysAgo.toISOString().slice(0, 16));
-  const [endTime, setEndTime] = useState(now.toISOString().slice(0, 16));
-  const [groupBy, setGroupBy] = useState("hour1");
+  const defaultStart = useRef(() => {
+    const d = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 16);
+  }).current();
+  const defaultEnd = useRef(() => new Date().toISOString().slice(0, 16)).current();
 
-  const loadCharts = useCallback(async (start: string, end: string, bin: string) => {
+  const startRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLInputElement>(null);
+  const [groupBy, setGroupBy] = useState("hour1");
+  const [chartType, setChartType] = useState<"LineChart" | "BarChart">("LineChart");
+
+  const loadCharts = useCallback(async (start: string, end: string, bin: string, type: "LineChart" | "BarChart" = "LineChart"): Promise<OldenLabsChartData[]> => {
     setError(null);
     setLoading(true);
     setAnovaResults({});
@@ -214,7 +290,7 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
         start_time: start,
         end_time: end,
         group_by: bin,
-        chart_type: "LineChart",
+        chart_type: type,
         error_bar_type: "SEM",
       });
 
@@ -226,17 +302,38 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
       }
 
       const chartArray: OldenLabsChartData[] = Array.isArray(data) ? data : [data];
-      if (chartArray.length === 0) {
+      // Filter charts to match the requested type.
+      // When BarChart is requested, the API returns both LineChart and BarChart items.
+      const filtered = type === "BarChart"
+        ? chartArray.filter((c) => c.typeName === "BarChart")
+        : chartArray.filter((c) => c.typeName !== "BarChart");
+      if (filtered.length === 0) {
         setError("No chart data available for the selected time range.");
-        return;
+        return chartArray;
       }
 
-      const sorted = sortCharts(chartArray);
+      const sorted = sortCharts(filtered);
       setCharts(sorted);
       setVisibleCount(INITIAL_VISIBLE);
 
-      // Fetch per-group data for ANOVA if we have group IDs
-      if (groupIds.length >= 2) {
+      // Compute ANOVA
+      if (type === "BarChart") {
+        // For bar charts, use scatter_data which has individual observations per group
+        const results: Record<number, { pValue: number; fStat: number } | null> = {};
+        for (const chart of sorted) {
+          if (chart.scatter_data && chart.scatter_data.length > 0) {
+            const groupMap: Record<string, number[]> = {};
+            for (const pt of chart.scatter_data) {
+              if (!groupMap[pt.x]) groupMap[pt.x] = [];
+              groupMap[pt.x].push(pt.y);
+            }
+            const groupDataArrays = Object.values(groupMap);
+            results[chart.chart_number] = computeAnova(groupDataArrays);
+          }
+        }
+        setAnovaResults(results);
+      } else if (groupIds.length >= 2) {
+        // For line charts, fetch per-group data for ANOVA
         setAnovaLoading(true);
         try {
           const groupChartResponses = await Promise.all(
@@ -247,7 +344,7 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
                 start_time: start,
                 end_time: end,
                 group_by: bin,
-                chart_type: "LineChart",
+                chart_type: type,
                 error_bar_type: "SEM",
               });
               const gRes = await fetch(`/api/oldenlabs/chart-group?${gParams}`);
@@ -258,7 +355,6 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
           );
 
           // Build: chart_number -> array of number[] (one per group)
-          // Each group's data is all non-null values across all datasets and time points
           const chartNumbers = new Set(sorted.map((c) => c.chart_number));
           const results: Record<number, { pValue: number; fStat: number } | null> = {};
 
@@ -275,7 +371,6 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
                 groupDataArrays.push([]);
                 continue;
               }
-              // Pool all non-null data points across all datasets (cages) in this group
               const values: number[] = [];
               for (const ds of chart.datasets) {
                 for (const v of ds.data) {
@@ -295,16 +390,34 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
           setAnovaLoading(false);
         }
       }
+
+      return chartArray;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load chart");
+      return [];
     } finally {
       setLoading(false);
     }
   }, [studyId, groupIds]);
 
-  // Auto-load on mount
+  const getStart = () => startRef.current?.value || defaultStart;
+  const getEnd = () => endRef.current?.value || defaultEnd;
+
+  // Auto-load on mount, then detect cage close time and narrow the start
   useEffect(() => {
-    loadCharts(startTime, endTime, groupBy);
+    (async () => {
+      const allCharts = await loadCharts(defaultStart, defaultEnd, groupBy, chartType);
+      const closeTime = findCageCloseTime(allCharts);
+      if (closeTime && startRef.current) {
+        // Format to datetime-local value (YYYY-MM-DDTHH:MM)
+        const formatted = closeTime.slice(0, 16).replace(" ", "T");
+        startRef.current.value = formatted;
+        // Notify parent so it can save the cage close time as experiment_start
+        onCageCloseDetected?.(formatted);
+        // Reload with the narrowed start time
+        await loadCharts(formatted, defaultEnd, groupBy, chartType);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -313,16 +426,16 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
       <h2 className="text-lg font-semibold mb-4">Olden Labs Charts</h2>
 
       <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div>
             <label htmlFor="chartStart" className="block text-xs font-medium mb-1 text-zinc-400">
               Start
             </label>
             <input
+              ref={startRef}
               id="chartStart"
               type="datetime-local"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
+              defaultValue={defaultStart}
               className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             />
           </div>
@@ -331,10 +444,10 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
               End
             </label>
             <input
+              ref={endRef}
               id="chartEnd"
               type="datetime-local"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
+              defaultValue={defaultEnd}
               className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             />
           </div>
@@ -355,11 +468,40 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
               ))}
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-medium mb-1 text-zinc-400">
+              Chart Type
+            </label>
+            <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden h-[38px]">
+              <button
+                type="button"
+                onClick={() => { setChartType("LineChart"); loadCharts(getStart(), getEnd(), groupBy, "LineChart"); }}
+                className={`flex-1 px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
+                  chartType === "LineChart"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                }`}
+              >
+                Line
+              </button>
+              <button
+                type="button"
+                onClick={() => { setChartType("BarChart"); loadCharts(getStart(), getEnd(), groupBy, "BarChart"); }}
+                className={`flex-1 px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
+                  chartType === "BarChart"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                }`}
+              >
+                Bar
+              </button>
+            </div>
+          </div>
         </div>
 
         <button
-          onClick={() => loadCharts(startTime, endTime, groupBy)}
-          disabled={loading || !startTime || !endTime}
+          onClick={() => loadCharts(getStart(), getEnd(), groupBy, chartType)}
+          disabled={loading}
           className="w-full px-4 py-2 rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 text-sm font-medium disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (
@@ -393,7 +535,7 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
           return (
             <>
               {visible.map((chart) => {
-                const { data, seriesKeys } = transformChart(chart);
+                const isBar = chart.typeName === "BarChart";
                 const anova = anovaResults[chart.chart_number];
                 return (
                   <div key={chart.chart_number} className="mt-8 pt-6 border-t border-zinc-100 dark:border-zinc-800/60">
@@ -402,68 +544,114 @@ export function OldenLabsChart({ studyId, groupIds = [] }: OldenLabsChartProps) 
                       {chart.subtitle && (
                         <p className="text-xs text-zinc-400 mt-0.5">{chart.subtitle}</p>
                       )}
+                      {chart.time_period_for_bar_chart && (
+                        <p className="text-xs text-zinc-400 mt-0.5">{chart.time_period_for_bar_chart}</p>
+                      )}
                     </div>
                     <ResponsiveContainer width="100%" height={320}>
-                      <LineChart data={data} margin={{ top: 8, right: 24, left: 12, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" strokeOpacity={0.4} />
-                        <XAxis
-                          dataKey="time"
-                          tickFormatter={formatTime}
-                          tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }}
-                          tickLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
-                          axisLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
-                          interval="preserveStartEnd"
-                        />
-                        <YAxis
-                          tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }}
-                          tickLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
-                          axisLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
-                          label={chart.yAxis ? { value: chart.yAxis, angle: -90, position: "insideLeft", style: { fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }, offset: 4 } : undefined}
-                        />
-                        <Tooltip
-                          labelFormatter={(label) => formatTime(String(label))}
-                          contentStyle={{
-                            backgroundColor: "rgba(255, 255, 255, 0.96)",
-                            border: "1px solid #e4e4e7",
-                            borderRadius: "8px",
-                            fontSize: "11px",
-                            fontFamily: "system-ui, sans-serif",
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                            padding: "8px 12px",
-                          }}
-                          labelStyle={{ color: "#71717a", fontSize: "10px", marginBottom: "4px" }}
-                          formatter={(value) => typeof value === "number" ? value.toFixed(2) : "N/A"}
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: "11px", fontFamily: "system-ui, sans-serif", color: "#71717a" }}
-                        />
-                        {seriesKeys.map((key, i) => (
-                          <Line
-                            key={key}
-                            type="monotone"
-                            dataKey={key}
-                            name={key}
-                            stroke={COLORS[i % COLORS.length]}
-                            strokeWidth={1.5}
-                            strokeOpacity={0.75}
-                            dot={false}
-                            connectNulls={false}
-                          />
-                        ))}
-                      </LineChart>
+                      {isBar ? (() => {
+                        const { data: barData } = transformBarChart(chart);
+                        return (
+                          <BarChart data={barData} margin={{ top: 8, right: 24, left: 12, bottom: 8 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" strokeOpacity={0.4} />
+                            <XAxis
+                              dataKey="name"
+                              tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }}
+                              tickLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              axisLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }}
+                              tickLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              axisLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              label={chart.yAxis ? { value: chart.yAxis, angle: -90, position: "insideLeft", style: { fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }, offset: 4 } : undefined}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "rgba(255, 255, 255, 0.96)",
+                                border: "1px solid #e4e4e7",
+                                borderRadius: "8px",
+                                fontSize: "11px",
+                                fontFamily: "system-ui, sans-serif",
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                                padding: "8px 12px",
+                              }}
+                              labelStyle={{ color: "#71717a", fontSize: "10px", marginBottom: "4px" }}
+                              formatter={(value) => typeof value === "number" ? value.toFixed(2) : "N/A"}
+                            />
+                            <Bar dataKey="value" name={chart.yAxis || "Value"}>
+                              <ErrorBar dataKey="errorHigh" direction="y" width={4} stroke="#71717a" strokeWidth={1} />
+                              {barData.map((_, i) => (
+                                <Cell key={i} fill={COLORS[i % COLORS.length]} fillOpacity={0.75} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        );
+                      })() : (() => {
+                        const { data, seriesKeys } = transformLineChart(chart);
+                        return (
+                          <LineChart data={data} margin={{ top: 8, right: 24, left: 12, bottom: 8 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" strokeOpacity={0.4} />
+                            <XAxis
+                              dataKey="time"
+                              tickFormatter={formatTime}
+                              tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }}
+                              tickLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              axisLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              interval="preserveStartEnd"
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }}
+                              tickLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              axisLine={{ stroke: "#d4d4d8", strokeOpacity: 0.4 }}
+                              label={chart.yAxis ? { value: chart.yAxis, angle: -90, position: "insideLeft", style: { fontSize: 10, fill: "#a1a1aa", fontFamily: "system-ui, sans-serif" }, offset: 4 } : undefined}
+                            />
+                            <Tooltip
+                              labelFormatter={(label) => formatTime(String(label))}
+                              contentStyle={{
+                                backgroundColor: "rgba(255, 255, 255, 0.96)",
+                                border: "1px solid #e4e4e7",
+                                borderRadius: "8px",
+                                fontSize: "11px",
+                                fontFamily: "system-ui, sans-serif",
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                                padding: "8px 12px",
+                              }}
+                              labelStyle={{ color: "#71717a", fontSize: "10px", marginBottom: "4px" }}
+                              formatter={(value) => typeof value === "number" ? value.toFixed(2) : "N/A"}
+                            />
+                            <Legend
+                              wrapperStyle={{ fontSize: "11px", fontFamily: "system-ui, sans-serif", color: "#71717a" }}
+                            />
+                            {seriesKeys.map((key, i) => (
+                              <Line
+                                key={key}
+                                type="monotone"
+                                dataKey={key}
+                                name={key}
+                                stroke={COLORS[i % COLORS.length]}
+                                strokeWidth={1.5}
+                                strokeOpacity={0.75}
+                                dot={false}
+                                connectNulls={false}
+                              />
+                            ))}
+                          </LineChart>
+                        );
+                      })()}
                     </ResponsiveContainer>
                     <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                       {anovaLoading ? (
                         <span className="italic">Computing ANOVA...</span>
                       ) : anova ? (
                         <span>
-                          Chart ANOVA p-value:{" "}
+                          ANOVA:{" "}
                           <span className={anova.pValue < 0.05 ? "font-semibold text-zinc-700 dark:text-zinc-200" : ""}>
                             {formatPValue(anova.pValue)}
                           </span>
                           <span className="ml-2 text-zinc-400">F = {anova.fStat.toFixed(2)}</span>
                         </span>
-                      ) : groupIds.length < 2 ? (
+                      ) : isBar ? null : groupIds.length < 2 ? (
                         <span className="italic">ANOVA requires at least 2 groups</span>
                       ) : (
                         <span className="italic">ANOVA: insufficient data</span>

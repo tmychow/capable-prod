@@ -123,6 +123,50 @@ def filename_from_s3_url(s3_url: str) -> str:
     return name
 
 
+def find_cage_close_time(charts: list[dict]) -> str | None:
+    """
+    Find cage close time from chart data.
+    Pattern: starts closed (1) → opened (0) → closed again (1).
+    Returns the label timestamp when cage closes again.
+    """
+    cage_chart = None
+    for c in charts:
+        if "cage in rack" in (c.get("name") or "").lower():
+            cage_chart = c
+            break
+    if not cage_chart:
+        return None
+
+    earliest_index = float("inf")
+    for ds in cage_chart.get("datasets", []):
+        data = ds.get("data")
+        if not isinstance(data, list):
+            continue
+        i = 0
+        # Phase 1: find initial closed state (1)
+        while i < len(data) and data[i] != 1:
+            i += 1
+        if i >= len(data):
+            continue
+        # Phase 2: find when it opens (0)
+        while i < len(data) and data[i] != 0:
+            i += 1
+        if i >= len(data):
+            continue
+        # Phase 3: find when it closes again (1)
+        while i < len(data) and data[i] != 1:
+            i += 1
+        if i >= len(data):
+            continue
+        if i < earliest_index:
+            earliest_index = i
+
+    labels = cage_chart.get("labels", [])
+    if earliest_index < float("inf") and earliest_index < len(labels):
+        return labels[earliest_index]
+    return None
+
+
 async def run_sync_studies_cron():
     """
     Cron: fetch all studies from Olden Labs, compare against existing
@@ -256,9 +300,48 @@ async def run_sync_studies_cron():
                 except Exception:
                     pass  # Continue without groups
 
-                # Format experiment_start from study create_date
                 create_date = study.get("create_date") or ""
                 experiment_start = create_date[:16] if create_date else None
+
+                # Try to detect cage close time from chart data
+                try:
+                    start_time = experiment_start or (
+                        datetime.now(timezone.utc)
+                        .replace(day=1)
+                        .strftime("%Y-%m-%dT%H:%M:%S")
+                    )
+                    end_time = datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%S"
+                    )
+                    chart_url = (
+                        f"{OLDEN_LABS_BASE_URL}/chart/"
+                        f"get-all-chart-data-study/"
+                        f"?chart_id=1"
+                        f"&start_time={start_time}"
+                        f"&end_time={end_time}"
+                        f"&filter_value={study_id}"
+                        f"&filter_by=study"
+                        f"&group_by=hour1"
+                        f"&group_id={study_id}"
+                        f"&study_id={study_id}"
+                        f"&chart_type=LineChart"
+                        f"&error_bar_type=SEM"
+                    )
+                    chart_res = await client.get(
+                        chart_url, headers=ol_headers, timeout=60
+                    )
+                    if chart_res.status_code == 200:
+                        chart_data = chart_res.json()
+                        charts_list = (
+                            chart_data
+                            if isinstance(chart_data, list)
+                            else [chart_data]
+                        )
+                        close_time = find_cage_close_time(charts_list)
+                        if close_time:
+                            experiment_start = close_time[:16]
+                except Exception:
+                    pass  # Fall back to create_date
 
                 study_name = study.get("name") or f"Study {study_id}"
                 exp_data = {

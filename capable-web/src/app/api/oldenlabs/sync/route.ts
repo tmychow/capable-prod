@@ -136,9 +136,11 @@ export async function GET(request: NextRequest) {
       sex: g.sex || "",
     }));
 
-    // Use create_date as experiment start (format for datetime-local: "2026-02-04T23:01")
+    // Use create_date as initial experiment_start.
+    // The actual cage-close-based start time is detected by the chart component
+    // on the frontend and saved separately (more reliable since it uses the same
+    // data the user sees).
     const createDate: string = studyData.study?.create_date || "";
-    // datetime-local inputs expect "YYYY-MM-DDTHH:MM" (no seconds)
     const experimentStart = createDate ? createDate.slice(0, 16) : "";
 
     return NextResponse.json({

@@ -11,7 +11,8 @@ import { EditableParameters } from "@/components/EditableParameters";
 import { EditablePeptides } from "@/components/EditablePeptides";
 import { EditableDetails } from "@/components/EditableDetails";
 import { DeleteExperimentButton } from "@/components/DeleteExperimentButton";
-import { OldenLabsChart } from "@/components/OldenLabsChart";
+import { OldenLabsChart, findCageCloseTime } from "@/components/OldenLabsChart";
+import type { OldenLabsChartData } from "@/components/OldenLabsChart";
 import { updateExperimentAction } from "@/app/experiments/actions";
 import type { Experiment } from "@/lib/api";
 
@@ -101,12 +102,40 @@ export function ExperimentContent({
 
       const syncData = await syncRes.json();
 
+      // Detect cage close time from chart data
+      let cageCloseUtc: string | null = null;
+      try {
+        const startTime = experiment.experiment_start
+          || syncData.experiment_start
+          || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+        const chartParams = new URLSearchParams({
+          study_id: String(experiment.olden_labs_study_id),
+          start_time: new Date(startTime).toISOString().slice(0, 16),
+          end_time: new Date().toISOString().slice(0, 16),
+          group_by: "hour1",
+          chart_type: "LineChart",
+          error_bar_type: "SEM",
+        });
+        const chartRes = await fetch(`/api/oldenlabs/chart?${chartParams}`);
+        if (chartRes.ok) {
+          const chartData = await chartRes.json();
+          const charts: OldenLabsChartData[] = Array.isArray(chartData) ? chartData : [chartData];
+          const closeTime = findCageCloseTime(charts);
+          if (closeTime) {
+            const formatted = closeTime.slice(0, 16).replace(" ", "T");
+            cageCloseUtc = new Date(formatted).toISOString();
+          }
+        }
+      } catch {
+        // Cage close detection failed, continue without it
+      }
+
       await updateExperimentAction(experiment.id, {
         ...(syncData.name && { name: syncData.name }),
         ...(syncData.description && { description: syncData.description }),
         ...(syncData.groups?.length > 0 && { groups: syncData.groups }),
-        ...(syncData.experiment_start && { experiment_start: syncData.experiment_start }),
         ...(syncData.organism_type && { organism_type: syncData.organism_type }),
+        ...(cageCloseUtc && { experiment_start: cageCloseUtc }),
       });
 
       router.refresh();
@@ -116,7 +145,7 @@ export function ExperimentContent({
       setResyncingOlden(false);
       NProgress.done();
     }
-  }, [experiment.olden_labs_study_id, experiment.id, router]);
+  }, [experiment.olden_labs_study_id, experiment.id, experiment.experiment_start, router]);
 
   return (
     <>
@@ -355,7 +384,10 @@ export function ExperimentContent({
 
       {experiment.olden_labs_study_id && (
         <div className="mt-8 pt-8 border-t border-zinc-200 dark:border-zinc-800">
-          <OldenLabsChart studyId={experiment.olden_labs_study_id} groupIds={(experiment.groups || []).map(g => g.group_id).filter(Boolean)} />
+          <OldenLabsChart
+            studyId={experiment.olden_labs_study_id}
+            groupIds={(experiment.groups || []).map(g => g.group_id).filter(Boolean)}
+          />
         </div>
       )}
 
