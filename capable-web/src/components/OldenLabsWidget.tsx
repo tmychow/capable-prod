@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import NProgress from "nprogress";
 import { updateExperimentAction } from "@/app/experiments/actions";
+import { findCageCloseTime } from "@/components/OldenLabsChart";
+import type { OldenLabsChartData } from "@/components/OldenLabsChart";
 
 interface OldenLabsWidgetProps {
   experimentId: string;
@@ -131,13 +133,49 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
       // No duplicate - save the study ID and sync data
       const syncData = syncRes.ok ? await syncRes.json() : null;
 
+      // Detect cage close time from chart data
+      let cageCloseUtc: string | null = null;
+      if (syncData) {
+        try {
+          const pad = (n: number) => String(n).padStart(2, "0");
+          const toLocal = (d: Date) =>
+            `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          const rawStart = syncData.experiment_start || toLocal(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+          const startDate = new Date(rawStart);
+          if (!isNaN(startDate.getTime())) {
+            startDate.setDate(startDate.getDate() - 1);
+          }
+          const startTime = toLocal(startDate);
+          const chartParams = new URLSearchParams({
+            study_id: newStudyId.trim(),
+            start_time: startTime,
+            end_time: toLocal(new Date()),
+            group_by: "hour1",
+            chart_type: "LineChart",
+            error_bar_type: "SEM",
+          });
+          const chartRes = await fetch(`/api/oldenlabs/chart?${chartParams}`);
+          if (chartRes.ok) {
+            const chartData = await chartRes.json();
+            const charts: OldenLabsChartData[] = Array.isArray(chartData) ? chartData : [chartData];
+            const closeTime = findCageCloseTime(charts);
+            if (closeTime) {
+              const formatted = closeTime.slice(0, 16).replace(" ", "T");
+              cageCloseUtc = new Date(formatted).toISOString();
+            }
+          }
+        } catch {
+          // Cage close detection failed, continue without it
+        }
+      }
+
       await updateExperimentAction(experimentId, {
         olden_labs_study_id: newStudyId.trim(),
         ...(syncData && {
           name: syncData.name || undefined,
           description: syncData.description || undefined,
           groups: syncData.groups?.length > 0 ? syncData.groups : undefined,
-          experiment_start: syncData.experiment_start || undefined,
+          experiment_start: cageCloseUtc || syncData.experiment_start || undefined,
           organism_type: syncData.organism_type || undefined,
         }),
       });

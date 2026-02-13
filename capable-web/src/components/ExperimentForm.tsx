@@ -9,6 +9,8 @@ import { toDateTimeLocal } from "@/lib/api";
 import { PeptideSelect } from "@/components/PeptideSelect";
 import { OrganismSelect } from "@/components/OrganismSelect";
 import { CageIdCell } from "@/components/CageIdCell";
+import { findCageCloseTime } from "@/components/OldenLabsChart";
+import type { OldenLabsChartData } from "@/components/OldenLabsChart";
 
 // Default peptides that are commonly used
 const DEFAULT_PEPTIDES = [
@@ -163,9 +165,39 @@ export default function ExperimentForm({
       const data = await res.json();
       if (data.name) setName(data.name);
       if (data.description) setDescription(data.description);
-      if (data.experiment_start) setExperimentStart(data.experiment_start);
       if (data.organism_type) setOrganismType(data.organism_type);
       if (data.groups && data.groups.length > 0) setGroups(data.groups);
+
+      // Detect cage close time from chart data
+      let cageCloseLocal: string | null = null;
+      try {
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const toLocal = (d: Date) =>
+          `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        const rawStart = data.experiment_start || toLocal(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+        const startDate = new Date(rawStart);
+        if (!isNaN(startDate.getTime())) startDate.setDate(startDate.getDate() - 1);
+        const chartParams = new URLSearchParams({
+          study_id: oldenLabsStudyId!,
+          start_time: toLocal(startDate),
+          end_time: toLocal(new Date()),
+          group_by: "hour1",
+          chart_type: "LineChart",
+          error_bar_type: "SEM",
+        });
+        const chartRes = await fetch(`/api/oldenlabs/chart?${chartParams}`);
+        if (chartRes.ok) {
+          const chartData = await chartRes.json();
+          const charts: OldenLabsChartData[] = Array.isArray(chartData) ? chartData : [chartData];
+          const closeTime = findCageCloseTime(charts);
+          if (closeTime) {
+            cageCloseLocal = closeTime.slice(0, 16).replace(" ", "T");
+          }
+        }
+      } catch {
+        // Cage close detection failed, continue without it
+      }
+      setExperimentStart(cageCloseLocal || data.experiment_start || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
     } finally {

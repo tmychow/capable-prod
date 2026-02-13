@@ -126,8 +126,8 @@ def filename_from_s3_url(s3_url: str) -> str:
 def find_cage_close_time(charts: list[dict]) -> str | None:
     """
     Find cage close time from chart data.
-    Pattern: starts closed (1) → opened (0) → closed again (1).
-    Returns the label timestamp when cage closes again.
+    Primary: closed (>=0.5) → opened (<0.5) → closed again (>=0.5).
+    Fallback: first open (<0.5) → closed (>=0.5) transition when data starts mid-setup.
     """
     cage_chart = None
     for c in charts:
@@ -137,33 +137,45 @@ def find_cage_close_time(charts: list[dict]) -> str | None:
     if not cage_chart:
         return None
 
+    def is_closed(v) -> bool:
+        return v is not None and v >= 0.5
+
+    def is_open(v) -> bool:
+        return v is not None and v < 0.5
+
     earliest_index = float("inf")
+    fallback_index = float("inf")
+
     for ds in cage_chart.get("datasets", []):
         data = ds.get("data")
         if not isinstance(data, list):
             continue
-        i = 0
-        # Phase 1: find initial closed state (1)
-        while i < len(data) and data[i] != 1:
-            i += 1
-        if i >= len(data):
-            continue
-        # Phase 2: find when it opens (0)
-        while i < len(data) and data[i] != 0:
-            i += 1
-        if i >= len(data):
-            continue
-        # Phase 3: find when it closes again (1)
-        while i < len(data) and data[i] != 1:
-            i += 1
-        if i >= len(data):
-            continue
-        if i < earliest_index:
-            earliest_index = i
 
+        # Try primary pattern: closed → open → closed
+        i = 0
+        while i < len(data) and not is_closed(data[i]):
+            i += 1
+        if i < len(data):
+            j = i
+            while j < len(data) and not is_open(data[j]):
+                j += 1
+            if j < len(data):
+                while j < len(data) and not is_closed(data[j]):
+                    j += 1
+                if j < len(data) and j < earliest_index:
+                    earliest_index = j
+
+        # Fallback: first open → closed transition
+        for k in range(1, len(data)):
+            if is_closed(data[k]) and is_open(data[k - 1]):
+                if k < fallback_index:
+                    fallback_index = k
+                break
+
+    idx = earliest_index if earliest_index < float("inf") else fallback_index
     labels = cage_chart.get("labels", [])
-    if earliest_index < float("inf") and earliest_index < len(labels):
-        return labels[earliest_index]
+    if idx < float("inf") and idx < len(labels):
+        return labels[idx]
     return None
 
 
