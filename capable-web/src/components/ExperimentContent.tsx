@@ -103,15 +103,34 @@ export function ExperimentContent({
       const syncData = await syncRes.json();
 
       // Detect cage close time from chart data
+      // Use study create_date (syncData.experiment_start) as the chart query start
+      // so we capture the full cage open→close pattern, not experiment.experiment_start
+      // which is already the cage close time from a previous sync.
       let cageCloseUtc: string | null = null;
       try {
-        const startTime = experiment.experiment_start
-          || syncData.experiment_start
-          || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+        // syncData.experiment_start is the study create_date from Olden Labs (local time).
+        // The chart API is timezone-naive — pass local times directly.
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const nowLocal = (() => {
+          const d = new Date();
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        })();
+        const fallbackStart = (() => {
+          const d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        })();
+        // Go 1 day before create_date so we capture the cage's initial closed state
+        // before it was opened for setup.
+        const rawStart = syncData.experiment_start || fallbackStart;
+        const startDate = new Date(rawStart);
+        if (!isNaN(startDate.getTime())) {
+          startDate.setDate(startDate.getDate() - 1);
+        }
+        const startTime = `${startDate.getFullYear()}-${pad(startDate.getMonth() + 1)}-${pad(startDate.getDate())}T${pad(startDate.getHours())}:${pad(startDate.getMinutes())}`;
         const chartParams = new URLSearchParams({
           study_id: String(experiment.olden_labs_study_id),
-          start_time: new Date(startTime).toISOString().slice(0, 16),
-          end_time: new Date().toISOString().slice(0, 16),
+          start_time: startTime,
+          end_time: nowLocal,
           group_by: "hour1",
           chart_type: "LineChart",
           error_bar_type: "SEM",
@@ -122,6 +141,7 @@ export function ExperimentContent({
           const charts: OldenLabsChartData[] = Array.isArray(chartData) ? chartData : [chartData];
           const closeTime = findCageCloseTime(charts);
           if (closeTime) {
+            // Label is local time — new Date() treats it as local, toISOString() converts to UTC for DB
             const formatted = closeTime.slice(0, 16).replace(" ", "T");
             cageCloseUtc = new Date(formatted).toISOString();
           }
@@ -130,12 +150,15 @@ export function ExperimentContent({
         // Cage close detection failed, continue without it
       }
 
+      // Use detected cage close, or preserve the existing experiment_start
+      const experimentStart = cageCloseUtc || experiment.experiment_start || null;
+
       await updateExperimentAction(experiment.id, {
         ...(syncData.name && { name: syncData.name }),
         ...(syncData.description && { description: syncData.description }),
         ...(syncData.groups?.length > 0 && { groups: syncData.groups }),
         ...(syncData.organism_type && { organism_type: syncData.organism_type }),
-        ...(cageCloseUtc && { experiment_start: cageCloseUtc }),
+        ...(experimentStart && { experiment_start: experimentStart }),
       });
 
       router.refresh();
@@ -385,7 +408,9 @@ export function ExperimentContent({
       {experiment.olden_labs_study_id && (
         <div className="mt-8 pt-8 border-t border-zinc-200 dark:border-zinc-800">
           <OldenLabsChart
+            key={experiment.experiment_start || "no-start"}
             studyId={experiment.olden_labs_study_id}
+            experimentStart={experiment.experiment_start}
             groupIds={(experiment.groups || []).map(g => g.group_id).filter(Boolean)}
           />
         </div>

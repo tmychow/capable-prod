@@ -19,7 +19,14 @@ import {
 interface OldenLabsChartProps {
   studyId: number;
   groupIds?: string[];
+  experimentStart?: string | null;
   onCageCloseDetected?: (timestamp: string) => void;
+}
+
+/** Convert a Date to a local "YYYY-MM-DDTHH:MM" string for datetime-local inputs and the Olden Labs API. */
+function toLocalDateTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 const BIN_OPTIONS = [
@@ -217,36 +224,47 @@ const INITIAL_VISIBLE = 5;
 
 /**
  * Find the cage close time in "Cage in rack" data.
- * Pattern: starts closed (1) → opened (0) → closed again (1).
- * The start time is when it returns to closed (1) after being opened for the first time.
+ * Primary: closed (≥0.5) → opened (<0.5) → closed again (≥0.5).
+ * Fallback: first open (<0.5) → closed (≥0.5) transition when data starts mid-setup.
  */
 export function findCageCloseTime(charts: OldenLabsChartData[]): string | null {
   const cageChart = charts.find((c) => c.name.toLowerCase().includes("cage in rack"));
   if (!cageChart) return null;
 
+  const isClosed = (v: number | null) => v !== null && v >= 0.5;
+  const isOpen = (v: number | null) => v !== null && v < 0.5;
+
   let earliestIndex = Infinity;
+  let fallbackIndex = Infinity;
+
   for (const ds of cageChart.datasets) {
     const data = ds.data as (number | null)[];
     if (!Array.isArray(data)) continue;
 
-    // Phase 1: skip leading nulls, find initial closed state (1)
+    // Try primary pattern: closed → open → closed
     let i = 0;
-    while (i < data.length && data[i] !== 1) i++;
-    if (i >= data.length) continue;
+    while (i < data.length && !isClosed(data[i])) i++;
+    if (i < data.length) {
+      let j = i;
+      while (j < data.length && !isOpen(data[j])) j++;
+      if (j < data.length) {
+        while (j < data.length && !isClosed(data[j])) j++;
+        if (j < data.length && j < earliestIndex) earliestIndex = j;
+      }
+    }
 
-    // Phase 2: find when it opens (transitions to 0)
-    while (i < data.length && data[i] !== 0) i++;
-    if (i >= data.length) continue;
-
-    // Phase 3: find when it closes again (transitions back to 1)
-    while (i < data.length && data[i] !== 1) i++;
-    if (i >= data.length) continue;
-
-    if (i < earliestIndex) earliestIndex = i;
+    // Fallback: first open → closed transition
+    for (let k = 0; k < data.length; k++) {
+      if (isClosed(data[k]) && k > 0 && isOpen(data[k - 1])) {
+        if (k < fallbackIndex) fallbackIndex = k;
+        break;
+      }
+    }
   }
 
-  if (earliestIndex < Infinity && earliestIndex < cageChart.labels.length) {
-    return cageChart.labels[earliestIndex];
+  const idx = earliestIndex < Infinity ? earliestIndex : fallbackIndex;
+  if (idx < Infinity && idx < cageChart.labels.length) {
+    return cageChart.labels[idx];
   }
   return null;
 }
@@ -260,7 +278,7 @@ function sortCharts(charts: OldenLabsChartData[]): OldenLabsChartData[] {
   });
 }
 
-export function OldenLabsChart({ studyId, groupIds = [], onCageCloseDetected }: OldenLabsChartProps) {
+export function OldenLabsChart({ studyId, groupIds = [], experimentStart, onCageCloseDetected }: OldenLabsChartProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [charts, setCharts] = useState<OldenLabsChartData[] | null>(null);
@@ -269,10 +287,12 @@ export function OldenLabsChart({ studyId, groupIds = [], onCageCloseDetected }: 
   const [anovaLoading, setAnovaLoading] = useState(false);
 
   const defaultStart = useRef(() => {
-    const d = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-    return d.toISOString().slice(0, 16);
+    if (experimentStart) {
+      return toLocalDateTime(new Date(experimentStart));
+    }
+    return toLocalDateTime(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
   }).current();
-  const defaultEnd = useRef(() => new Date().toISOString().slice(0, 16)).current();
+  const defaultEnd = useRef(() => toLocalDateTime(new Date())).current();
 
   const startRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLInputElement>(null);
@@ -403,19 +423,24 @@ export function OldenLabsChart({ studyId, groupIds = [], onCageCloseDetected }: 
   const getStart = () => startRef.current?.value || defaultStart;
   const getEnd = () => endRef.current?.value || defaultEnd;
 
-  // Auto-load on mount, then detect cage close time and narrow the start
+  // Auto-load on mount. If we already have an experiment start (cage close time),
+  // use it directly. Otherwise fetch a wide window and auto-detect cage close.
   useEffect(() => {
     (async () => {
-      const allCharts = await loadCharts(defaultStart, defaultEnd, groupBy, chartType);
-      const closeTime = findCageCloseTime(allCharts);
-      if (closeTime && startRef.current) {
-        // Format to datetime-local value (YYYY-MM-DDTHH:MM)
-        const formatted = closeTime.slice(0, 16).replace(" ", "T");
-        startRef.current.value = formatted;
-        // Notify parent so it can save the cage close time as experiment_start
-        onCageCloseDetected?.(formatted);
-        // Reload with the narrowed start time
-        await loadCharts(formatted, defaultEnd, groupBy, chartType);
+      if (experimentStart) {
+        // We already know the cage close time — just load from there
+        await loadCharts(defaultStart, defaultEnd, groupBy, chartType);
+      } else {
+        // No saved start — fetch 2 days of data and try to detect cage close
+        const allCharts = await loadCharts(defaultStart, defaultEnd, groupBy, chartType);
+        const closeTime = findCageCloseTime(allCharts);
+        if (closeTime && startRef.current) {
+          // Label is local time — use directly for the datetime-local input
+          const formatted = closeTime.slice(0, 16).replace(" ", "T");
+          startRef.current.value = formatted;
+          onCageCloseDetected?.(formatted);
+          await loadCharts(formatted, defaultEnd, groupBy, chartType);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
