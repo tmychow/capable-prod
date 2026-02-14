@@ -11,6 +11,7 @@ interface OldenLabsWidgetProps {
   experimentId: string;
   studyId: number | null;
   editMode?: boolean;
+  onAuthChange?: (authenticated: boolean) => void;
 }
 
 const BIN_OPTIONS = [
@@ -24,7 +25,7 @@ const BIN_OPTIONS = [
   { value: "day1", label: "1 Day" },
 ];
 
-export function OldenLabsWidget({ experimentId, studyId, editMode = false }: OldenLabsWidgetProps) {
+export function OldenLabsWidget({ experimentId, studyId, editMode = false, onAuthChange }: OldenLabsWidgetProps) {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
@@ -86,6 +87,7 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
       }
 
       setAuthenticated(true);
+      onAuthChange?.(true);
       setEmail("");
       setPassword("");
     } catch (err) {
@@ -103,6 +105,7 @@ export function OldenLabsWidget({ experimentId, studyId, editMode = false }: Old
     try {
       await fetch("/api/oldenlabs/auth", { method: "DELETE" });
       setAuthenticated(false);
+      onAuthChange?.(false);
     } finally {
       setLoading(false);
       NProgress.done();

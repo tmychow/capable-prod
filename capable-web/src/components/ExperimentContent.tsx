@@ -33,6 +33,7 @@ export function ExperimentContent({
   const [downloadToast, setDownloadToast] = useState<{ label: string; hiding: boolean } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [resyncingOlden, setResyncingOlden] = useState(false);
+  const [oldenAuthVersion, setOldenAuthVersion] = useState(0);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCompleted = experiment.experiment_end !== null;
 
@@ -310,6 +311,7 @@ export function ExperimentContent({
             experimentId={experiment.id}
             studyId={experiment.olden_labs_study_id}
             editMode={editMode}
+            onAuthChange={(authed) => { if (authed) setOldenAuthVersion((v) => v + 1); }}
           />
 
           <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
@@ -408,7 +410,7 @@ export function ExperimentContent({
       {experiment.olden_labs_study_id && (
         <div className="mt-8 pt-8 border-t border-zinc-200 dark:border-zinc-800">
           <OldenLabsChart
-            key={experiment.experiment_start || "no-start"}
+            key={`${experiment.experiment_start || "no-start"}-${oldenAuthVersion}`}
             studyId={experiment.olden_labs_study_id}
             experimentStart={experiment.experiment_start}
             groupIds={(experiment.groups || []).map(g => g.group_id).filter(Boolean)}
