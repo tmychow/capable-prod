@@ -5,41 +5,31 @@ import NProgress from "nprogress";
 
 const VALID_AAS = new Set("ACDEFGHIKLMNPQRSTVWY");
 
-const MMPS = [
-  "MMP1", "MMP10", "MMP11", "MMP12", "MMP13", "MMP14", "MMP15", "MMP16",
-  "MMP17", "MMP19", "MMP2", "MMP20", "MMP24", "MMP25", "MMP3", "MMP7",
-  "MMP8", "MMP9",
-];
-
-interface WindowResult {
-  header: string;
-  sequence: string;
+interface BondResult {
+  position: number;
+  p1: string;
+  p1_prime: string;
   scores: Record<string, number>;
-  uncertainties: Record<string, number>;
 }
 
 interface PredictionResponse {
   sequence: string;
-  windows: WindowResult[];
+  proteases: string[];
+  bonds: BondResult[];
 }
 
-// The cleavage bond is between positions 5 and 6 of each 10-mer window (P1-P1').
-// For window starting at index i in the full sequence, the cleavage site is between
-// residues i+4 and i+5 (0-indexed).
-const CLEAVAGE_OFFSET = 5;
-
-function getScoreColor(score: number): string {
-  if (score >= 2.0) return "bg-red-500 text-white";
-  if (score >= 1.0) return "bg-orange-400 text-white";
-  if (score >= 0.5) return "bg-yellow-300 text-zinc-900";
-  if (score >= 0) return "bg-green-100 text-zinc-700 dark:bg-green-900/30 dark:text-green-300";
+function getProbColor(prob: number): string {
+  if (prob >= 0.8) return "bg-red-500 text-white";
+  if (prob >= 0.5) return "bg-orange-400 text-white";
+  if (prob >= 0.3) return "bg-yellow-300 text-zinc-900";
+  if (prob >= 0.1) return "bg-green-100 text-zinc-700 dark:bg-green-900/30 dark:text-green-300";
   return "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
 }
 
-function getResidueColor(maxScore: number): string {
-  if (maxScore >= 2.0) return "bg-red-500 text-white";
-  if (maxScore >= 1.0) return "bg-orange-400 text-white";
-  if (maxScore >= 0.5) return "bg-yellow-300 text-zinc-900";
+function getResidueColor(maxProb: number): string {
+  if (maxProb >= 0.8) return "bg-red-500 text-white";
+  if (maxProb >= 0.5) return "bg-orange-400 text-white";
+  if (maxProb >= 0.3) return "bg-yellow-300 text-zinc-900";
   return "";
 }
 
@@ -48,11 +38,11 @@ export function CleavageSiteAnalyzer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<PredictionResponse | null>(null);
-  const [selectedMmp, setSelectedMmp] = useState<string>("MMP1");
+  const [selectedProtease, setSelectedProtease] = useState<string>("");
 
   const cleaned = sequence.replace(/\s/g, "").toUpperCase();
   const invalidChars = [...new Set([...cleaned].filter((ch) => !VALID_AAS.has(ch)))];
-  const isValid = cleaned.length >= 10 && invalidChars.length === 0;
+  const isValid = cleaned.length >= 2 && cleaned.length <= 200 && invalidChars.length === 0;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -77,6 +67,9 @@ export function CleavageSiteAnalyzer() {
       }
 
       setResults(data);
+      if (data.proteases?.length > 0 && !selectedProtease) {
+        setSelectedProtease(data.proteases[0]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Prediction failed");
     } finally {
@@ -85,37 +78,37 @@ export function CleavageSiteAnalyzer() {
     }
   }
 
-  // Compute per-residue max scores for the sequence view
-  // Each window i gives cleavage info for the bond between residues i+4 and i+5.
-  // We assign that score to residue i+4 (the P1 residue before the cut).
+  const proteases = results?.proteases ?? [];
+
+  // Per-residue max probability across all proteases (assigned to P1 residue)
   const residueScores: number[] = results
     ? (() => {
-        const scores = new Array(results.sequence.length).fill(-Infinity);
-        results.windows.forEach((w, i) => {
-          const residueIdx = i + CLEAVAGE_OFFSET - 1; // P1 residue
-          const maxScore = Math.max(...MMPS.map((m) => w.scores[m]));
-          scores[residueIdx] = Math.max(scores[residueIdx], maxScore);
+        const scores = new Array(results.sequence.length).fill(0);
+        results.bonds.forEach((bond) => {
+          const idx = bond.position - 1; // 0-indexed P1 residue
+          const maxProb = Math.max(...Object.values(bond.scores));
+          scores[idx] = Math.max(scores[idx], maxProb);
         });
         return scores;
       })()
     : [];
 
-  // Top cleavage sites
+  // Top cleavage sites ranked by max probability
   const topSites = results
-    ? results.windows
-        .map((w, i) => {
-          const maxMmp = MMPS.reduce((best, m) =>
-            w.scores[m] > w.scores[best] ? m : best
+    ? results.bonds
+        .map((bond) => {
+          const maxProtease = proteases.reduce((best, p) =>
+            bond.scores[p] > bond.scores[best] ? p : best
           );
           return {
-            position: i + CLEAVAGE_OFFSET,
-            bond: `${results.sequence[i + CLEAVAGE_OFFSET - 1]}${i + CLEAVAGE_OFFSET}-${results.sequence[i + CLEAVAGE_OFFSET]}${i + CLEAVAGE_OFFSET + 1}`,
-            maxScore: w.scores[maxMmp],
-            maxMmp,
-            window: w,
+            position: bond.position,
+            bondLabel: `${bond.p1}${bond.position}-${bond.p1_prime}${bond.position + 1}`,
+            maxProb: bond.scores[maxProtease],
+            maxProtease,
+            bond,
           };
         })
-        .sort((a, b) => b.maxScore - a.maxScore)
+        .sort((a, b) => b.maxProb - a.maxProb)
         .slice(0, 10)
     : [];
 
@@ -130,7 +123,7 @@ export function CleavageSiteAnalyzer() {
           <textarea
             value={sequence}
             onChange={(e) => setSequence(e.target.value)}
-            placeholder="Enter amino acid sequence (e.g., GPAGLAGQRGIVGLPGQRGER)..."
+            placeholder="Enter amino acid sequence (e.g., KGLDVDSLVIEHIQVNKAPK)..."
             rows={4}
             className="w-full px-4 py-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
           />
@@ -143,14 +136,19 @@ export function CleavageSiteAnalyzer() {
                 Invalid characters: {invalidChars.join(", ")}
               </span>
             )}
-            {cleaned.length > 0 && cleaned.length < 10 && invalidChars.length === 0 && (
+            {cleaned.length > 0 && cleaned.length < 2 && invalidChars.length === 0 && (
               <span className="text-amber-500">
-                Minimum 10 residues required
+                Minimum 2 residues required
+              </span>
+            )}
+            {cleaned.length > 200 && (
+              <span className="text-amber-500">
+                Maximum 200 residues
               </span>
             )}
             {isValid && (
               <span className="text-green-600 dark:text-green-400">
-                {cleaned.length - 9} window{cleaned.length - 9 !== 1 ? "s" : ""} will be analyzed
+                {cleaned.length - 1} bond{cleaned.length - 1 !== 1 ? "s" : ""} will be analyzed
               </span>
             )}
           </div>
@@ -177,7 +175,7 @@ export function CleavageSiteAnalyzer() {
           <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
             <h2 className="text-lg font-semibold mb-1">Sequence Overview</h2>
             <p className="text-sm text-zinc-500 mb-4">
-              Residues colored by max cleavage z-score across all MMPs at that position.
+              Residues colored by max cleavage probability across all proteases.
               Color indicates the P1 residue (before the scissile bond).
             </p>
             <div className="flex flex-wrap gap-0.5 font-mono text-sm">
@@ -188,9 +186,7 @@ export function CleavageSiteAnalyzer() {
                   </span>
                   <span
                     className={`w-6 h-6 flex items-center justify-center rounded text-xs font-medium ${
-                      residueScores[i] > -Infinity
-                        ? getResidueColor(residueScores[i])
-                        : ""
+                      getResidueColor(residueScores[i])
                     }`}
                   >
                     {aa}
@@ -200,16 +196,16 @@ export function CleavageSiteAnalyzer() {
             </div>
             <div className="mt-4 flex items-center gap-4 text-xs text-zinc-500">
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-red-500 inline-block" /> z &ge; 2.0
+                <span className="w-3 h-3 rounded bg-red-500 inline-block" /> p &ge; 0.8
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-orange-400 inline-block" /> z &ge; 1.0
+                <span className="w-3 h-3 rounded bg-orange-400 inline-block" /> p &ge; 0.5
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-yellow-300 inline-block" /> z &ge; 0.5
+                <span className="w-3 h-3 rounded bg-yellow-300 inline-block" /> p &ge; 0.3
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-zinc-100 dark:bg-zinc-800 inline-block border border-zinc-200 dark:border-zinc-700" /> z &lt; 0.5
+                <span className="w-3 h-3 rounded bg-zinc-100 dark:bg-zinc-800 inline-block border border-zinc-200 dark:border-zinc-700" /> p &lt; 0.3
               </span>
             </div>
           </section>
@@ -226,9 +222,8 @@ export function CleavageSiteAnalyzer() {
                     <tr className="border-b border-zinc-200 dark:border-zinc-700">
                       <th className="text-left py-2 pr-4 font-medium text-zinc-500">Bond</th>
                       <th className="text-left py-2 pr-4 font-medium text-zinc-500">Position</th>
-                      <th className="text-left py-2 pr-4 font-medium text-zinc-500">Window</th>
-                      <th className="text-left py-2 pr-4 font-medium text-zinc-500">Top MMP</th>
-                      <th className="text-right py-2 font-medium text-zinc-500">Z-Score</th>
+                      <th className="text-left py-2 pr-4 font-medium text-zinc-500">Top Protease</th>
+                      <th className="text-right py-2 font-medium text-zinc-500">Probability</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -238,22 +233,19 @@ export function CleavageSiteAnalyzer() {
                         className="border-b border-zinc-100 dark:border-zinc-800"
                       >
                         <td className="py-2 pr-4 font-mono font-medium">
-                          {site.bond}
+                          {site.bondLabel}
                         </td>
                         <td className="py-2 pr-4 text-zinc-500">
                           {site.position}&#8211;{site.position + 1}
                         </td>
-                        <td className="py-2 pr-4 font-mono text-zinc-500">
-                          {site.window.sequence}
-                        </td>
-                        <td className="py-2 pr-4">{site.maxMmp}</td>
+                        <td className="py-2 pr-4">{site.maxProtease}</td>
                         <td className="py-2 text-right">
                           <span
-                            className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${getScoreColor(
-                              site.maxScore
+                            className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${getProbColor(
+                              site.maxProb
                             )}`}
                           >
-                            {site.maxScore.toFixed(2)}
+                            {site.maxProb.toFixed(3)}
                           </span>
                         </td>
                       </tr>
@@ -264,18 +256,18 @@ export function CleavageSiteAnalyzer() {
             )}
           </section>
 
-          {/* Heatmap by MMP */}
+          {/* Per-protease detail */}
           <section className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Scores by MMP</h2>
+              <h2 className="text-lg font-semibold">Scores by Protease</h2>
               <select
-                value={selectedMmp}
-                onChange={(e) => setSelectedMmp(e.target.value)}
+                value={selectedProtease}
+                onChange={(e) => setSelectedProtease(e.target.value)}
                 className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {MMPS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                {proteases.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
                   </option>
                 ))}
               </select>
@@ -285,42 +277,36 @@ export function CleavageSiteAnalyzer() {
                 <thead>
                   <tr className="border-b border-zinc-200 dark:border-zinc-700">
                     <th className="text-left py-2 pr-4 font-medium text-zinc-500">Position</th>
-                    <th className="text-left py-2 pr-4 font-medium text-zinc-500">Window</th>
-                    <th className="text-right py-2 pr-4 font-medium text-zinc-500">Z-Score</th>
-                    <th className="text-right py-2 font-medium text-zinc-500">Uncertainty</th>
+                    <th className="text-left py-2 pr-4 font-medium text-zinc-500">Bond</th>
+                    <th className="text-right py-2 font-medium text-zinc-500">Probability</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {results.windows.map((w, i) => {
-                    const score = w.scores[selectedMmp];
-                    const unc = w.uncertainties[selectedMmp];
+                  {results.bonds.map((bond, i) => {
+                    const prob = bond.scores[selectedProtease] ?? 0;
                     return (
                       <tr
                         key={i}
                         className="border-b border-zinc-100 dark:border-zinc-800"
                       >
                         <td className="py-2 pr-4 text-zinc-500">
-                          {i + CLEAVAGE_OFFSET}&#8211;{i + CLEAVAGE_OFFSET + 1}
+                          {bond.position}&#8211;{bond.position + 1}
                         </td>
-                        <td className="py-2 pr-4 font-mono text-zinc-500">
-                          {w.sequence.slice(0, CLEAVAGE_OFFSET - 1)}
+                        <td className="py-2 pr-4 font-mono">
+                          {bond.p1}
                           <span className="font-bold text-zinc-900 dark:text-zinc-100 border-b-2 border-red-400">
-                            {w.sequence[CLEAVAGE_OFFSET - 1]}
-                            {w.sequence[CLEAVAGE_OFFSET]}
+                            |
                           </span>
-                          {w.sequence.slice(CLEAVAGE_OFFSET + 1)}
+                          {bond.p1_prime}
                         </td>
-                        <td className="py-2 pr-4 text-right">
+                        <td className="py-2 text-right">
                           <span
-                            className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${getScoreColor(
-                              score
+                            className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${getProbColor(
+                              prob
                             )}`}
                           >
-                            {score.toFixed(2)}
+                            {prob.toFixed(3)}
                           </span>
-                        </td>
-                        <td className="py-2 text-right text-zinc-400">
-                          &plusmn;{unc.toFixed(3)}
                         </td>
                       </tr>
                     );

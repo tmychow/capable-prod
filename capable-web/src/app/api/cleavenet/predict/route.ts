@@ -24,9 +24,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (raw.length < 10) {
+  if (raw.length < 2) {
     return NextResponse.json(
-      { error: "Sequence must be at least 10 residues long." },
+      { error: "Sequence must be at least 2 residues long." },
+      { status: 400 }
+    );
+  }
+
+  if (raw.length > 200) {
+    return NextResponse.json(
+      { error: "Sequence must be at most 200 residues long." },
       { status: 400 }
     );
   }
@@ -38,15 +45,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Build sliding 10-mer windows
-  const windows: string[] = [];
-  for (let i = 0; i <= raw.length - 10; i++) {
-    windows.push(raw.slice(i, i + 10));
-  }
-
-  // Format as FASTA
-  const fastaLines = windows.map((w, i) => `>pos_${i}\n${w}`).join("\n");
-
   try {
     const res = await fetch(CLEAVENET_URL, {
       method: "POST",
@@ -54,7 +52,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${CLEAVENET_API_KEY}`,
       },
-      body: JSON.stringify({ fasta: fastaLines }),
+      body: JSON.stringify({ sequence: raw }),
     });
 
     if (!res.ok) {
@@ -66,10 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await res.json();
-    return NextResponse.json({
-      sequence: raw,
-      windows: data.results,
-    });
+    return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(
       { error: `Failed to reach CleavNet: ${err instanceof Error ? err.message : "unknown error"}` },
