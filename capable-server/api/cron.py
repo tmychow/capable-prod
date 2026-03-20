@@ -10,7 +10,7 @@ from urllib.parse import unquote
 
 from api.database import get_supabase_admin
 
-OLDEN_LABS_BASE_URL = "https://oldenlabs.com:8000"
+OLDEN_LABS_BASE_URL = "https://api.oldenlabs.com"
 OLDEN_LABS_EMAIL = os.getenv("OLDEN_LABS_EMAIL", "")
 OLDEN_LABS_PASSWORD = os.getenv("OLDEN_LABS_PASSWORD", "")
 MODAL_UPLOAD_URL = os.getenv("MODAL_UPLOAD_URL", "")
@@ -207,7 +207,7 @@ async def run_sync_studies_cron():
         if not token:
             return {"success": False, "error": "OL login returned no token"}
 
-        ol_headers = {"Cookie": f"olden_labs={token}"}
+        ol_headers = {"Authorization": f"Bearer {token}"}
 
         # 2. Fetch all studies
         studies_res = await client.get(
@@ -422,7 +422,7 @@ async def run_pickup_cron():
         # 2. Fetch notifications
         res = await client.get(
             f"{OLDEN_LABS_BASE_URL}/notification/all",
-            headers={"Cookie": f"olden_labs={token}"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         if res.status_code != 200:
             return {
