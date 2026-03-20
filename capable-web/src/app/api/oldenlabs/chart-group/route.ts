@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-const OLDEN_LABS_BASE_URL = "https://oldenlabs.com:8000";
+const OLDEN_LABS_BASE_URL = "https://api.oldenlabs.com";
 const OLDEN_LABS_COOKIE = "olden_labs_token";
 
 function ensureSeconds(timestamp: string): string {
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
   try {
     const response = await fetch(url, {
       headers: {
-        Cookie: `olden_labs=${token.value}`,
+        Authorization: `Bearer ${token.value}`,
       },
     });
 

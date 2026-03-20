@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getServerSession } from "@/lib/session";
 import { getExperiments } from "@/lib/api";
 
-const OLDEN_LABS_BASE_URL = "https://oldenlabs.com:8000";
+const OLDEN_LABS_BASE_URL = "https://api.oldenlabs.com";
 const OLDEN_LABS_COOKIE = "olden_labs_token";
 const FETCH_TIMEOUT_MS = 30000; // 30 seconds
 
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
   }
 
   const headers = {
-    Cookie: `olden_labs=${token.value}`,
+    Authorization: `Bearer ${token.value}`,
   };
 
   try {
